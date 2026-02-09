@@ -1,0 +1,15 @@
+[package]
+name = "polaris_agent"
+version = "0.0.1"
+description = "Agent trait for defining reusable behavior patterns in Polaris."
+edition = "2024"
+keywords = []
+
+[lints]
+workspace = true
+
+[dependencies]
+polaris_graph = { path = "../polaris_graph" }
+
+[dev-dependencies]
+polaris_system = { path = "../polaris_system" }

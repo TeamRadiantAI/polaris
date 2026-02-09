@@ -1,0 +1,133 @@
+//! Model provider registry.
+
+use crate::error::CreateModelError;
+use crate::llm::{Llm, LlmProvider};
+use polaris_system::resource::GlobalResource;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Registry for model provider implementations.
+///
+/// # For Consumers
+///
+/// Access models using provider/model identifiers (e.g., `"openai/gpt-4o"`).
+/// See [`llm()`](Self::llm) for details.
+///
+/// # For Provider Plugin Authors
+///
+/// Provider plugins must register themselves during their `build()` phase. The registry
+/// is available as a mutable resource during this phase and becomes an immutable global
+/// after the `ready()` phase.
+///
+/// ```ignore
+/// impl Plugin for MyProviderPlugin {
+///     fn dependencies(&self) -> Vec<PluginId> {
+///         vec![PluginId::of::<ModelsPlugin>()]
+///     }
+///
+///     fn build(&self, server: &mut Server) {
+///         let provider = MyProvider::new(/* ... */);
+///
+///         let mut registry = server
+///             .get_resource_mut::<ModelRegistry>()
+///             .expect("ModelsPlugin must be added before provider plugins");
+///
+///         registry.register_llm_provider("my_provider", Arc::new(provider));
+///     }
+/// }
+/// ```
+#[derive(Default)]
+pub struct ModelRegistry {
+    // Maps provider names to implementations.
+    llm_providers: HashMap<String, Arc<dyn LlmProvider>>,
+}
+
+impl core::fmt::Debug for ModelRegistry {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ModelRegistry")
+            .field("llm_providers", &self.llm_provider_names())
+            .finish()
+    }
+}
+
+impl GlobalResource for ModelRegistry {}
+
+impl ModelRegistry {
+    /// Creates an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            llm_providers: HashMap::new(),
+        }
+    }
+
+    /// Creates a handle to an [`Llm`].
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - Identifier in `"provider/model"` format (e.g., `"openai/gpt-4o"`)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `model_id` structure is invalid or the provider is not registered.
+    pub fn llm(&self, model_id: impl AsRef<str>) -> Result<Llm, CreateModelError> {
+        let model_id = model_id.as_ref();
+
+        let (provider_name, model_name) = model_id
+            .split_once('/')
+            .ok_or_else(|| CreateModelError::InvalidModelId(model_id.to_string()))?;
+
+        let provider = self
+            .get_llm_provider(provider_name)
+            .ok_or_else(|| CreateModelError::UnknownProvider(provider_name.to_string()))?;
+
+        Ok(Llm::new(provider, model_name.to_string()))
+    }
+
+    /// Registers an LLM provider.
+    ///
+    /// This method may only be called during the `build()` phase when the registry is
+    /// available as a mutable resource via [`Server::get_resource_mut`]. After the
+    /// `ready()` phase, the registry becomes an immutable global and registration is
+    /// no longer possible.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Provider name used in identifiers (e.g., `"openai"` for `"openai/gpt-4o"`)
+    /// * `provider` - The provider implementation
+    ///
+    /// # Panics
+    ///
+    /// Panics if a provider with the same name is already registered.
+    pub fn register_llm_provider<P: LlmProvider>(
+        &mut self,
+        name: impl Into<String>,
+        provider: Arc<P>,
+    ) {
+        let name = name.into();
+        assert!(
+            !self.llm_providers.contains_key(&name),
+            "LLM provider '{name}' is already registered"
+        );
+        self.llm_providers
+            .insert(name, provider as Arc<dyn LlmProvider>);
+    }
+
+    /// Returns a provider by name.
+    #[must_use]
+    pub fn get_llm_provider(&self, name: impl AsRef<str>) -> Option<Arc<dyn LlmProvider>> {
+        self.llm_providers.get(name.as_ref()).cloned()
+    }
+
+    /// Checks if a provider is registered.
+    #[must_use]
+    pub fn has_llm_provider(&self, name: impl AsRef<str>) -> bool {
+        self.llm_providers.contains_key(name.as_ref())
+    }
+
+    /// Lists registered provider names.
+    #[must_use]
+    pub fn llm_provider_names(&self) -> Vec<String> {
+        self.llm_providers.keys().cloned().collect()
+    }
+}

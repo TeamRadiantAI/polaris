@@ -1,0 +1,207 @@
+//! Procedural macros for the `polaris_system` crate.
+//!
+//! This crate provides the `#[system]` attribute macro for defining
+//! system components in the Polaris framework.
+//!
+//! # Example
+//!
+//! ```ignore
+//! use polaris_system::param::Res;
+//! use polaris_system::system;
+//!
+//! #[system]
+//! async fn read_counter(counter: Res<Counter>) -> CounterOutput {
+//!     CounterOutput { value: counter.value }
+//! }
+//!
+//! // Use the generated system:
+//! let system = read_counter();
+//! ```
+
+use proc_macro::TokenStream;
+use quote::{format_ident, quote};
+use syn::{FnArg, ItemFn, Pat, ReturnType, parse_macro_input};
+
+/// Transforms an async function into a System implementation.
+///
+/// The macro generates a struct that implements `System`, allowing async functions
+/// with lifetime-parameterized parameters (like `Res<'_, T>`) to work correctly.
+///
+/// # Usage
+///
+/// ```ignore
+/// #[system]
+/// async fn my_system(res: Res<MyResource>) -> MyOutput {
+///     MyOutput { value: res.field }
+/// }
+///
+/// // Creates a system:
+/// let system = my_system();
+/// ```
+///
+/// # Generated Code
+///
+/// For an async function like:
+/// ```ignore
+/// #[system]
+/// async fn read_counter(counter: Res<Counter>) -> Output {
+///     Output { value: counter.count }
+/// }
+/// ```
+///
+/// The macro generates:
+/// ```ignore
+/// struct ReadCounterSystem;
+///
+/// impl System for ReadCounterSystem {
+///     type Output = Output;
+///
+///     fn run<'a>(&'a self, ctx: &'a SystemContext<'_>)
+///         -> BoxFuture<'a, Result<Self::Output, SystemError>>
+///     {
+///         Box::pin(async move {
+///             let counter = Res::<Counter>::fetch(ctx)?;
+///             Ok({ Output { value: counter.count } })
+///         })
+///     }
+///
+///     fn name(&self) -> &'static str {
+///         "read_counter"
+///     }
+/// }
+///
+/// fn read_counter() -> ReadCounterSystem {
+///     ReadCounterSystem
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as ItemFn);
+
+    // Validate: must be async
+    if input.sig.asyncness.is_none() {
+        return syn::Error::new_spanned(input.sig.fn_token, "system functions must be async")
+            .to_compile_error()
+            .into();
+    }
+
+    let fn_name = &input.sig.ident;
+    let fn_name_str = fn_name.to_string();
+    let struct_name = format_ident!("{}System", to_pascal_case(&fn_name_str));
+    let body = &input.block;
+    let vis = &input.vis;
+
+    // Extract return type (default to () if not specified)
+    let ret_type = match &input.sig.output {
+        ReturnType::Type(_, ty) => quote!(#ty),
+        ReturnType::Default => quote!(()),
+    };
+
+    // Extract parameters and generate fetch calls + access merges
+    let mut fetch_stmts = Vec::new();
+    let mut param_names = Vec::new();
+    let mut param_types = Vec::new();
+
+    for arg in &input.sig.inputs {
+        if let FnArg::Typed(pat_type) = arg {
+            // Get parameter name
+            let param_name = if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                &pat_ident.ident
+            } else {
+                return syn::Error::new_spanned(
+                    &pat_type.pat,
+                    "system parameters must be simple identifiers",
+                )
+                .to_compile_error()
+                .into();
+            };
+
+            // Get parameter type (strip the lifetime for the fetch call)
+            let param_type = &pat_type.ty;
+
+            // Generate: let param_name = ParamType::fetch(ctx)?;
+            // We need to handle the mutability
+            let is_mut = if let Pat::Ident(pat_ident) = &*pat_type.pat {
+                pat_ident.mutability.is_some()
+            } else {
+                false
+            };
+
+            let fetch_stmt = if is_mut {
+                quote! {
+                    let mut #param_name = <#param_type as ::polaris_system::param::SystemParam>::fetch(ctx)?;
+                }
+            } else {
+                quote! {
+                    let #param_name = <#param_type as ::polaris_system::param::SystemParam>::fetch(ctx)?;
+                }
+            };
+
+            fetch_stmts.push(fetch_stmt);
+            param_names.push(param_name.clone());
+            param_types.push(param_type.clone());
+        }
+    }
+
+    // Generate access merge statements for each parameter type
+    let access_merges: Vec<_> = param_types
+        .iter()
+        .map(|param_type| {
+            quote! {
+                access.merge(&<#param_type as ::polaris_system::param::SystemParam>::access());
+            }
+        })
+        .collect();
+
+    // Generate the struct and System impl
+    // Note: Uses `::polaris_system::` paths for use within polaris_system crate.
+    // The macro is re-exported from polaris_system via `pub use system_macros::system;`
+    let expanded = quote! {
+        /// System struct generated by the `#[system]` macro.
+        #vis struct #struct_name;
+
+        impl ::polaris_system::system::System for #struct_name {
+            type Output = #ret_type;
+
+            fn run<'a>(
+                &'a self,
+                ctx: &'a ::polaris_system::param::SystemContext<'_>,
+            ) -> ::polaris_system::system::BoxFuture<'a, ::core::result::Result<Self::Output, ::polaris_system::system::SystemError>> {
+                ::std::boxed::Box::pin(async move {
+                    #(#fetch_stmts)*
+                    ::core::result::Result::Ok(#body)
+                })
+            }
+
+            fn name(&self) -> &'static str {
+                #fn_name_str
+            }
+
+            fn access(&self) -> ::polaris_system::param::SystemAccess {
+                let mut access = ::polaris_system::param::SystemAccess::new();
+                #(#access_merges)*
+                access
+            }
+        }
+
+        /// Creates an instance of the system.
+        #vis fn #fn_name() -> #struct_name {
+            #struct_name
+        }
+    };
+
+    expanded.into()
+}
+
+/// Converts `snake_case` to `PascalCase`.
+fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}

@@ -1,0 +1,45 @@
+[config]
+skip_core_tasks = true
+min_version = "0.37.0"
+
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+[tasks.test]
+description = "Run all testing steps (build, format, clippy, test)"
+dependencies = ["build", "test-format", "test-clippy", "test-polaris-system", "test-polar-graph", "test-polar-agent"]
+
+[tasks.build]
+description = "Build the project"
+command = "cargo"
+args = ["build", "--verbose"]
+
+[tasks.test-format]
+description = "Check code formatting"
+command = "cargo"
+args = ["fmt", "--", "--check"]
+
+[tasks.format]
+description = "Fix code formatting issues"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.test-clippy]
+description = "Run clippy lints"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.test-polaris-system]
+description = "Run polaris-system tests"
+command = "cargo"
+args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_system"]
+
+[tasks.test-polar-graph]
+description = "Run polaris-graph tests"
+command = "cargo"
+args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_graph"]
+
+[tasks.test-polar-agent]
+description = "Run polaris-agent tests"
+command = "cargo"
+args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_agent"]

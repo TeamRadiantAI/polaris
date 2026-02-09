@@ -1,0 +1,14 @@
+[package]
+name = "polaris_internal"
+version = "0.0.1"
+description = "An internal Polaris crate"
+edition = "2024"
+keywords = []
+
+[dependencies]
+polaris_system = { path = "../polaris_system" }
+polaris_graph = { path = "../polaris_graph" }
+polaris_agent = { path = "../polaris_agent" }
+
+[lints]
+workspace = true

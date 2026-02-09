@@ -1,0 +1,21 @@
+[package]
+name = "polaris_core"
+version = "0.0.1"
+description = "Core infrastructure plugins for Polaris including time, tracing, and server utilities."
+edition = "2024"
+keywords = ["polaris", "plugin", "infrastructure"]
+
+[lints]
+workspace = true
+
+[dependencies]
+polaris_system = { path = "../polaris_system" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["rt", "sync", "macros"] }
+
+[features]
+default = []
+test-utils = []

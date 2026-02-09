@@ -1,0 +1,20 @@
+[package]
+name = "polaris_system"
+version = "0.0.1"
+description = "A lightweight ECS-inspired system framework for Polaris."
+edition = "2024"
+keywords = []
+
+[lints]
+workspace = true
+
+[dependencies]
+system_macros = { path = "system_macros" }
+downcast-rs = "2.0.2"
+parking_lot = { version = "0.12.5", features = ["send_guard"] }
+thiserror = "2.0.17"
+hashbrown = "0.16.0"
+
+# Async runtime
+[dev-dependencies]
+tokio = { version = "1.43", features = ["rt", "sync", "macros"] }

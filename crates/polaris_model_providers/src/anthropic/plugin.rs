@@ -1,0 +1,50 @@
+//! Anthropic provider plugin.
+
+use super::provider::AnthropicProvider;
+use polaris_models::ModelRegistry;
+use polaris_models::ModelsPlugin;
+use polaris_system::plugin::{Plugin, PluginId};
+use polaris_system::server::Server;
+use std::sync::Arc;
+
+/// Plugin providing support for Anthropic models.
+///
+/// ```ignore
+/// server.add_plugins(AnthropicPlugin::from_env("ANTHROPIC_API_KEY"));
+/// ```
+pub struct AnthropicPlugin {
+    api_key: String,
+}
+
+impl AnthropicPlugin {
+    /// Creates a plugin that reads the API key from the specified environment variable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the environment variable is not set.
+    #[must_use]
+    pub fn from_env(env_var: &str) -> Self {
+        let api_key = std::env::var(env_var).unwrap_or_else(|_| {
+            panic!("Environment variable {env_var} for AnthropicPlugin not set. Please set it to your Anthropic API key.");
+        });
+        Self { api_key }
+    }
+}
+
+impl Plugin for AnthropicPlugin {
+    fn dependencies(&self) -> Vec<PluginId> {
+        vec![PluginId::of::<ModelsPlugin>()]
+    }
+
+    fn build(&self, server: &mut Server) {
+        let provider = AnthropicProvider::new(self.api_key.clone());
+
+        let Some(mut registry) = server.get_resource_mut::<ModelRegistry>() else {
+            panic!(
+                "ModelRegistry not found. Make sure to add ModelsPlugin before AnthropicPlugin."
+            );
+        };
+
+        registry.register_llm_provider("anthropic", Arc::new(provider));
+    }
+}

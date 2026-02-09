@@ -1,0 +1,17 @@
+[package]
+name = "polaris_graph"
+version = "0.0.1"
+description = "Graph-based agent execution primitives for Polaris (Layer 2)."
+edition = "2024"
+keywords = []
+
+[lints]
+workspace = true
+
+[dependencies]
+polaris_system = { path = "../polaris_system" }
+tokio = { version = "1", features = ["time"] }
+futures = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }

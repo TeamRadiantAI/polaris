@@ -1,0 +1,85 @@
+name: Build Server Image
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - "*/**.rs"
+      - "polaris-server.Dockerfile"
+      - "*/**/Cargo.toml"
+      - .github/workflows/build_server.yml
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-server-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_CICD_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # Set up SSH for private dependencies
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: |
+            ${{ secrets.BRAVE_SEARCH_PRIVATE_KEY }}
+            ${{ secrets.AIRTABLE_PRIVATE_KEY }}
+            ${{ secrets.BROWSER_USE_PRIVATE_KEY }}
+            ${{ secrets.CRAWLER_ENGINE_PRIVATE_KEY }}
+
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Collect Git and SSH config files in a directory that is part of the Docker build context
+        run: |
+          mkdir root-config
+          cp -r ~/.gitconfig  ~/.ssh root-config/
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          mask-password: "true"
+
+      - name: Get git commit SHA
+        id: get_sha
+        run: |
+          calculatedSha=$(git rev-parse --short ${{ github.sha }})
+          echo "GITHUB_SHA=$calculatedSha" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/})" >> $GITHUB_ENV
+
+      - name: Build and tag Docker image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: polaris/server
+          IMAGE_TAG: ${{ env.GITHUB_SHA }}
+          BRANCH_TAG: ${{ env.BRANCH_NAME }}
+        run: |
+          docker buildx build --ssh default=$SSH_AUTH_SOCK -t $REGISTRY/$REPOSITORY:$IMAGE_TAG -f polaris-server.Dockerfile .
+          docker tag $REGISTRY/$REPOSITORY:$IMAGE_TAG $REGISTRY/$REPOSITORY:$BRANCH_TAG
+          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+          docker push $REGISTRY/$REPOSITORY:$BRANCH_TAG
+
+      - name: Tag and push 'latest' for main branch
+        if: github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: polaris/server
+          IMAGE_TAG: ${{ env.GITHUB_SHA }}
+        run: |
+          docker tag $REGISTRY/$REPOSITORY:${{ env.GITHUB_SHA }} $REGISTRY/$REPOSITORY:latest
+          docker push $REGISTRY/$REPOSITORY:latest
