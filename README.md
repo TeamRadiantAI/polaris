@@ -73,11 +73,6 @@ polaris = { git = "https://github.com/TeamRadiantAI/polaris" }
 | | |
 |-|-|
 | [philosophy.md](docs/philosophy.md) | Design principles and rationale |
-| [taxonomy.md](docs/taxonomy.md) | Layered architecture |
-| [system.md](docs/design_patterns/system.md) | Systems, Resources, Plugins |
-| [graph.md](docs/design_patterns/graph.md) | Graph execution and control flow |
-| [agents.md](docs/design_patterns/agents.md) | Agent patterns (ReAct, ReWOO, etc.) |
-| [plugins.md](docs/design_patterns/plugins.md) | Plugin system and lifecycle |
 
 ## License
 
