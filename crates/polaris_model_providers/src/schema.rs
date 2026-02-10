@@ -133,16 +133,15 @@ pub fn normalize_schema_for_strict_mode(mut schema: Value) -> Value {
         }
 
         // Remove external $ref (URLs)
-        if let Some(ref_val) = obj.get("$ref") {
-            if let Some(ref_str) = ref_val.as_str() {
-                if ref_str.starts_with("http://") || ref_str.starts_with("https://") {
-                    tracing::warn!(
-                        ref_url = ref_str,
-                        "Removed external $ref URL (only internal refs supported in strict mode)"
-                    );
-                    obj.remove("$ref");
-                }
-            }
+        if let Some(ref_val) = obj.get("$ref")
+            && let Some(ref_str) = ref_val.as_str()
+            && (ref_str.starts_with("http://") || ref_str.starts_with("https://"))
+        {
+            tracing::warn!(
+                ref_url = ref_str,
+                "Removed external $ref URL (only internal refs supported in strict mode)"
+            );
+            obj.remove("$ref");
         }
 
         if let Some(Value::Array(all_of)) = obj.get_mut("allOf") {

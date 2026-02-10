@@ -98,7 +98,9 @@ pub fn document_to_json(doc: &Document) -> serde_json::Value {
             aws_smithy_types::Number::Float(f) => serde_json::Number::from_f64(*f)
                 .map(serde_json::Value::Number)
                 .unwrap_or_else(|| {
-                    tracing::warn!("cannot convert {f} to JSON (NaN/Infinity not supported), using null");
+                    tracing::warn!(
+                        "cannot convert {f} to JSON (NaN/Infinity not supported), using null"
+                    );
                     serde_json::Value::Null
                 }),
         },

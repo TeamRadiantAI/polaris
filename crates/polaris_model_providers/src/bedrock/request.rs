@@ -253,9 +253,8 @@ fn convert_tool_choice(
 pub fn build_output_config(
     request: &GenerationRequest,
 ) -> Result<Option<bedrock::OutputConfig>, GenerationError> {
-    let schema = match &request.output_schema {
-        Some(schema) => schema,
-        None => return Ok(None),
+    let Some(schema) = &request.output_schema else {
+        return Ok(None);
     };
 
     // Normalize the schema to comply with Bedrock's strict mode requirements

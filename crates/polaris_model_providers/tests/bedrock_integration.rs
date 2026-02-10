@@ -11,7 +11,7 @@
 
 mod common;
 
-use common::{init_env, LlmTestExt};
+use common::{LlmTestExt, init_env};
 use polaris_model_providers::bedrock::BedrockPlugin;
 use polaris_models::llm::Llm;
 use polaris_models::{ModelRegistry, ModelsPlugin};

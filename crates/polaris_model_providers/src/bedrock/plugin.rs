@@ -28,7 +28,7 @@ pub struct BedrockPlugin {
 }
 
 impl BedrockPlugin {
-    /// Initialises [BedrockPlugin] using the default AWS credential chain.
+    /// Initialises [`BedrockPlugin`] using the default AWS credential chain.
     #[must_use]
     pub fn from_env() -> Self {
         Self { sdk_config: None }

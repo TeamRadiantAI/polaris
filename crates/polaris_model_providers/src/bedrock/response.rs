@@ -14,9 +14,9 @@ pub fn convert_response(response: ConverseOutput) -> Result<GenerationResponse, 
             .into_iter()
             .map(convert_content_block)
             .collect::<Result<Vec<_>, _>>()?,
-        Some(e) => {
+        Some(unexpected) => {
             return Err(GenerationError::InvalidResponse(format!(
-                "unexpected output type {e:?} from Bedrock"
+                "unexpected output type {unexpected:?} from Bedrock"
             )));
         }
         None => Vec::new(),
