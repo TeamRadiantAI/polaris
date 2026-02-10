@@ -971,10 +971,10 @@ fn plugin_accesses_api_in_ready() {
         fn build(&self, _server: &mut Server) {}
 
         fn ready(&self, server: &mut Server) {
-            if let Some(api) = server.api::<TestAPI>() {
-                if api.name == "provided" {
-                    self.accessed.store(true, Ordering::SeqCst);
-                }
+            if let Some(api) = server.api::<TestAPI>()
+                && api.name == "provided"
+            {
+                self.accessed.store(true, Ordering::SeqCst);
             }
         }
 
