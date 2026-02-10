@@ -9,7 +9,7 @@ homepage = "https://getradiant.ai"
 keywords = ["ai", "agents", "ecs", "async", "framework"]
 license = "Apache-2.0"
 repository = "https://github.com/TeamRadiantAI/polaris"
-rust-version = "1.88.0"
+rust-version = "1.93.0"
 
 [workspace]
 resolver = "2"
@@ -47,6 +47,7 @@ allow_attributes_without_reason = "warn"
 
 [workspace.lints.rust]
 missing_docs = "warn"
+mismatched_lifetime_syntaxes = "allow"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs_dep)'] }
 unsafe_op_in_unsafe_fn = "warn"
 unused_qualifications = "warn"

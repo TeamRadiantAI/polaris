@@ -66,7 +66,7 @@ Same pattern, different tools, different models — the graph structure is porta
 polaris = { git = "https://github.com/TeamRadiantAI/polaris" }
 ```
 
-**Requires** Rust 1.88.0+ (Edition 2024). Run `cargo make test` for the full suite.
+**Requires** Rust 1.93.0+ (Edition 2024). Run `cargo make test` for the full suite.
 
 ## Documentation
 
