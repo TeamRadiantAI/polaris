@@ -533,10 +533,10 @@ impl GraphExecutor {
     /// Finds the next node connected by a sequential edge.
     fn find_next_sequential(&self, graph: &Graph, from: NodeId) -> Result<NodeId, ExecutionError> {
         for edge in graph.edges() {
-            if let Edge::Sequential(seq) = edge {
-                if seq.from == from {
-                    return Ok(seq.to);
-                }
+            if let Edge::Sequential(seq) = edge
+                && seq.from == from
+            {
+                return Ok(seq.to);
             }
         }
         Err(ExecutionError::NoNextNode(from))
@@ -547,10 +547,10 @@ impl GraphExecutor {
     /// Returns the target node ID if an error edge exists from `from`.
     fn find_error_edge(&self, graph: &Graph, from: NodeId) -> Option<NodeId> {
         for edge in graph.edges() {
-            if let Edge::Error(err_edge) = edge {
-                if err_edge.from == from {
-                    return Some(err_edge.to);
-                }
+            if let Edge::Error(err_edge) = edge
+                && err_edge.from == from
+            {
+                return Some(err_edge.to);
             }
         }
         None
@@ -561,10 +561,10 @@ impl GraphExecutor {
     /// Returns the target node ID if a timeout edge exists from `from`.
     fn find_timeout_edge(&self, graph: &Graph, from: NodeId) -> Option<NodeId> {
         for edge in graph.edges() {
-            if let Edge::Timeout(timeout_edge) = edge {
-                if timeout_edge.from == from {
-                    return Some(timeout_edge.to);
-                }
+            if let Edge::Timeout(timeout_edge) = edge
+                && timeout_edge.from == from
+            {
+                return Some(timeout_edge.to);
             }
         }
         None
@@ -591,10 +591,10 @@ impl GraphExecutor {
 
             loop {
                 // Check termination predicate first
-                if let Some(term) = &loop_node.termination {
-                    if term.evaluate(ctx).map_err(ExecutionError::PredicateError)? {
-                        break;
-                    }
+                if let Some(term) = &loop_node.termination
+                    && term.evaluate(ctx).map_err(ExecutionError::PredicateError)?
+                {
+                    break;
                 }
 
                 // Check max iterations
@@ -814,8 +814,9 @@ impl GraphExecutor {
                         };
 
                         // Execute branch as subgraph (with increased depth)
-                        let branch_count =
-                            self.execute_subgraph(graph, ctx, branch_entry, depth + 1).await?;
+                        let branch_count = self
+                            .execute_subgraph(graph, ctx, branch_entry, depth + 1)
+                            .await?;
                         nodes_executed += branch_count;
 
                         // After branch, find next sequential from decision node

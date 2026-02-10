@@ -499,7 +499,7 @@ struct DiamondResult {
 }
 
 /// Tests parallel diverge/converge execution:
-/// entry -> [branch_a, branch_b] (concurrent) -> after_join
+/// `entry` -> [`branch_a`, `branch_b`] (concurrent) -> `after_join`
 ///
 /// Verifies that:
 /// 1. Both branches execute (total node count)
@@ -571,7 +571,7 @@ async fn parallel_diamond_execution() {
 }
 
 /// Tests conditional diverge/converge execution:
-/// decision -> (true) -> true_step -> converge
+/// `decision` -> (true) -> `true_step` -> converge
 #[tokio::test]
 async fn conditional_diverge_converge_diamond() {
     #[derive(Debug, Clone)]

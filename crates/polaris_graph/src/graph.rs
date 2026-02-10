@@ -662,11 +662,11 @@ impl Graph {
     /// ```
     pub fn set_timeout(&mut self, node_id: NodeId, timeout: core::time::Duration) -> &mut Self {
         for node in &mut self.nodes {
-            if let Node::System(sys) = node {
-                if sys.id == node_id {
-                    sys.timeout = Some(timeout);
-                    return self;
-                }
+            if let Node::System(sys) = node
+                && sys.id == node_id
+            {
+                sys.timeout = Some(timeout);
+                return self;
             }
         }
         panic!("set_timeout: node {node_id} not found or is not a system node");
@@ -841,10 +841,10 @@ impl Graph {
             self.nodes.iter().map(Node::id).collect();
 
         // Validate entry point exists
-        if let Some(entry) = self.entry {
-            if !valid_nodes.contains(&entry) {
-                errors.push(ValidationError::InvalidEntryPoint(entry));
-            }
+        if let Some(entry) = self.entry
+            && !valid_nodes.contains(&entry)
+        {
+            errors.push(ValidationError::InvalidEntryPoint(entry));
         }
 
         // Validate edges reference valid nodes
@@ -1062,14 +1062,14 @@ impl Graph {
                         name: dec.name,
                         branch: "true",
                     });
-                } else if let Some(target) = dec.true_branch {
-                    if !valid_nodes.contains(&target) {
-                        errors.push(ValidationError::InvalidBranchTarget {
-                            node: dec.id,
-                            branch: "true",
-                            target,
-                        });
-                    }
+                } else if let Some(target) = dec.true_branch
+                    && !valid_nodes.contains(&target)
+                {
+                    errors.push(ValidationError::InvalidBranchTarget {
+                        node: dec.id,
+                        branch: "true",
+                        target,
+                    });
                 }
                 if dec.false_branch.is_none() {
                     errors.push(ValidationError::MissingBranch {
@@ -1077,14 +1077,14 @@ impl Graph {
                         name: dec.name,
                         branch: "false",
                     });
-                } else if let Some(target) = dec.false_branch {
-                    if !valid_nodes.contains(&target) {
-                        errors.push(ValidationError::InvalidBranchTarget {
-                            node: dec.id,
-                            branch: "false",
-                            target,
-                        });
-                    }
+                } else if let Some(target) = dec.false_branch
+                    && !valid_nodes.contains(&target)
+                {
+                    errors.push(ValidationError::InvalidBranchTarget {
+                        node: dec.id,
+                        branch: "false",
+                        target,
+                    });
                 }
             }
 
@@ -1111,13 +1111,13 @@ impl Graph {
                         });
                     }
                 }
-                if let Some(default) = sw.default {
-                    if !valid_nodes.contains(&default) {
-                        errors.push(ValidationError::InvalidDefaultTarget {
-                            node: sw.id,
-                            target: default,
-                        });
-                    }
+                if let Some(default) = sw.default
+                    && !valid_nodes.contains(&default)
+                {
+                    errors.push(ValidationError::InvalidDefaultTarget {
+                        node: sw.id,
+                        target: default,
+                    });
                 }
             }
 
@@ -1143,13 +1143,13 @@ impl Graph {
                         node: par.id,
                         name: par.name,
                     });
-                } else if let Some(join) = par.join {
-                    if !valid_nodes.contains(&join) {
-                        errors.push(ValidationError::InvalidJoinTarget {
-                            node: par.id,
-                            target: join,
-                        });
-                    }
+                } else if let Some(join) = par.join
+                    && !valid_nodes.contains(&join)
+                {
+                    errors.push(ValidationError::InvalidJoinTarget {
+                        node: par.id,
+                        target: join,
+                    });
                 }
             }
 
@@ -1167,13 +1167,13 @@ impl Graph {
                         node: lp.id,
                         name: lp.name,
                     });
-                } else if let Some(body) = lp.body_entry {
-                    if !valid_nodes.contains(&body) {
-                        errors.push(ValidationError::InvalidLoopBody {
-                            node: lp.id,
-                            target: body,
-                        });
-                    }
+                } else if let Some(body) = lp.body_entry
+                    && !valid_nodes.contains(&body)
+                {
+                    errors.push(ValidationError::InvalidLoopBody {
+                        node: lp.id,
+                        target: body,
+                    });
                 }
                 // Note: exit is optional - the executor will use sequential edge if not set
             }
