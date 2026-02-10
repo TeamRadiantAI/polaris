@@ -64,18 +64,18 @@ pub fn execute_tool(
 ) -> Result<String, String> {
     match name {
         "list_files" => {
-            let params: ListFilesParams =
-                serde_json::from_value(args.clone()).map_err(|e| format!("invalid params: {e}"))?;
+            let params: ListFilesParams = serde_json::from_value(args.clone())
+                .map_err(|err| format!("invalid params: {err}"))?;
             list_files(&params.path, config)
         }
         "read_file" => {
-            let params: ReadFileParams =
-                serde_json::from_value(args.clone()).map_err(|e| format!("invalid params: {e}"))?;
+            let params: ReadFileParams = serde_json::from_value(args.clone())
+                .map_err(|err| format!("invalid params: {err}"))?;
             read_file(&params.path, config)
         }
         "write_file" => {
-            let params: WriteFileParams =
-                serde_json::from_value(args.clone()).map_err(|e| format!("invalid params: {e}"))?;
+            let params: WriteFileParams = serde_json::from_value(args.clone())
+                .map_err(|err| format!("invalid params: {err}"))?;
             write_file(&params.path, &params.content, config)
         }
         _ => Err(format!("unknown tool: {name}")),
@@ -87,10 +87,10 @@ fn list_files(path: &str, config: &AgentConfig) -> Result<String, String> {
         .resolve_path(path)
         .ok_or_else(|| format!("path '{path}' escapes sandbox"))?;
 
-    let entries = std::fs::read_dir(&resolved).map_err(|e| e.to_string())?;
+    let entries = std::fs::read_dir(&resolved).map_err(|err| err.to_string())?;
     let files: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
         .collect();
 
     Ok(if files.is_empty() {
@@ -104,13 +104,13 @@ fn read_file(path: &str, config: &AgentConfig) -> Result<String, String> {
     let resolved = config
         .resolve_path(path)
         .ok_or_else(|| format!("path '{path}' escapes sandbox"))?;
-    std::fs::read_to_string(&resolved).map_err(|e| e.to_string())
+    std::fs::read_to_string(&resolved).map_err(|err| err.to_string())
 }
 
 fn write_file(path: &str, content: &str, config: &AgentConfig) -> Result<String, String> {
     let resolved = config
         .resolve_path(path)
         .ok_or_else(|| format!("path '{path}' escapes sandbox"))?;
-    std::fs::write(&resolved, content).map_err(|e| e.to_string())?;
+    std::fs::write(&resolved, content).map_err(|err| err.to_string())?;
     Ok(format!("Wrote to {}", resolved.display()))
 }

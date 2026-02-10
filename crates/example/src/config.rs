@@ -3,7 +3,7 @@
 use polaris_system::resource::LocalResource;
 use std::path::PathBuf;
 
-/// Configuration for the ReAct agent.
+/// Configuration for the `ReAct` agent.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
     /// Model identifier (e.g., "anthropic/claude-sonnet-4-5-20250929").

@@ -1,4 +1,4 @@
-//! Example ReAct agent CLI.
+//! Example `ReAct` agent CLI.
 //!
 //! A file assistant that can list, read, and write files within a sandboxed directory.
 //!
@@ -28,8 +28,8 @@ async fn main() {
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: <working_dir> <query>");
-        eprintln!("Example: ./sandbox \"List all files\"");
+        tracing::error!("Usage: <working_dir> <query>");
+        tracing::error!("Example: ./sandbox \"List all files\"");
         std::process::exit(1);
     }
 
@@ -37,15 +37,15 @@ async fn main() {
     let query = &args[2];
 
     if !working_dir.is_dir() {
-        eprintln!("Error: {} is not a directory", working_dir.display());
+        tracing::error!("Error: {} is not a directory", working_dir.display());
         std::process::exit(1);
     }
 
-    let working_dir = working_dir.canonicalize().unwrap_or_else(|e| {
-        eprintln!(
+    let working_dir = working_dir.canonicalize().unwrap_or_else(|err| {
+        tracing::error!(
             "Error: cannot canonicalize {}: {}",
             working_dir.display(),
-            e
+            err
         );
         std::process::exit(1);
     });
@@ -70,7 +70,7 @@ async fn main() {
     let graph = ReActAgent.to_graph();
     let executor = GraphExecutor::new().with_default_max_iterations(10);
 
-    if let Err(e) = executor.execute(&graph, &mut ctx).await {
-        eprintln!("Error: {e}");
+    if let Err(err) = executor.execute(&graph, &mut ctx).await {
+        tracing::error!("Error: {err}");
     }
 }

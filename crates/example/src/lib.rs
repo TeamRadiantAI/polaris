@@ -1,4 +1,4 @@
-//! Example ReAct (Reasoning + Acting) agent built with Polaris.
+//! Example `ReAct` (Reasoning + Acting) agent built with Polaris.
 //!
 //! This example demonstrates how to build an agentic loop using Polaris's graph-based
 //! execution model. The agent can reason about user requests and use tools to fulfill them.
@@ -83,12 +83,12 @@ pub struct ToolResult {
     pub success: bool,
 }
 
-/// Schema for LLM structured reasoning output.
+/// Schema for `LLM` structured reasoning output.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 struct LlmReasoningOutput {
     /// The agent's thought process.
     thought: String,
-    /// Action: "use_tool" or "respond".
+    /// Action: `use_tool` or `respond`.
     action: String,
 }
 
@@ -102,7 +102,7 @@ async fn reason(
     let model_id = &config.model_id;
     let messages = context.messages.clone();
 
-    let llm = registry.llm(&model_id).expect("model not found");
+    let llm = registry.llm(model_id).expect("model not found");
 
     let tools_text = tools::get_tool_definitions()
         .iter()
@@ -130,8 +130,8 @@ Based on the conversation, decide what to do next.
         .await
     {
         Ok(output) => {
-            println!("\n[Reasoning] {}", output.thought);
-            println!("[Decision] {}\n", output.action);
+            tracing::info!("\n[Reasoning] {}", output.thought);
+            tracing::info!("[Decision] {}\n", output.action);
             ReasoningResult {
                 action: if output.action == "use_tool" {
                     Action::UseTool
@@ -140,8 +140,8 @@ Based on the conversation, decide what to do next.
                 },
             }
         }
-        Err(e) => {
-            eprintln!("LLM error: {e}");
+        Err(err) => {
+            tracing::error!("LLM error: {err}");
             ReasoningResult {
                 action: Action::Respond,
             }
@@ -159,7 +159,7 @@ async fn select_tool(
     let model_id = &config.model_id;
     let messages = context.messages.clone();
 
-    let llm = registry.llm(&model_id).expect("model not found");
+    let llm = registry.llm(model_id).expect("model not found");
 
     let gen_request = GenerationRequest::with_system(SYSTEM_PROMPT, "Select a tool to use.")
         .history(messages)
@@ -174,17 +174,18 @@ async fn select_tool(
                 None
             }
         }),
-        Err(e) => {
-            eprintln!("LLM error: {e}");
+        Err(err) => {
+            tracing::error!("LLM error: {err}");
             None
         }
     };
 
     match tool_call {
         Some(call) => {
-            println!(
+            tracing::info!(
                 "[Tool Call] {}({})",
-                call.function.name, call.function.arguments
+                call.function.name,
+                call.function.arguments
             );
 
             // Add assistant message with tool call to history
@@ -202,7 +203,7 @@ async fn select_tool(
             }
         }
         None => {
-            println!("[Tool Call] list_files({{\"path\": \".\"}}) (fallback)");
+            tracing::info!("[Tool Call] list_files({{\"path\": \".\"}}) (fallback)");
 
             // Create fallback tool call and add to history
             let fallback = polaris_models::llm::ToolCall {
@@ -238,7 +239,7 @@ async fn execute_tool(call: Out<ToolCall>, config: Res<AgentConfig>) -> ToolResu
     let args = serde_json::to_value(&call.args).unwrap_or_default();
     match tools::execute_tool(&call.name, &args, &config) {
         Ok(output) => {
-            println!("[Tool Result] {}\n", output);
+            tracing::info!("[Tool Result] {}\n", output);
             ToolResult {
                 id: call.id.clone(),
                 output,
@@ -246,7 +247,7 @@ async fn execute_tool(call: Out<ToolCall>, config: Res<AgentConfig>) -> ToolResu
             }
         }
         Err(err) => {
-            println!("[Tool Error] {}\n", err);
+            tracing::info!("[Tool Error] {}\n", err);
             ToolResult {
                 id: call.id.clone(),
                 output: err,
@@ -284,7 +285,7 @@ async fn respond(
     let model_id = &config.model_id;
     let messages = context.messages.clone();
 
-    let llm = registry.llm(&model_id).expect("model not found");
+    let llm = registry.llm(model_id).expect("model not found");
 
     let gen_request =
         GenerationRequest::with_system(SYSTEM_PROMPT, "Please provide your final response.")
@@ -293,21 +294,21 @@ async fn respond(
     match llm.generate(gen_request).await {
         Ok(response) => {
             let text = response.text();
-            println!("[Response]\n{text}");
+            tracing::info!("[Response]\n{text}");
 
             // Add assistant response to history
             context.push(Message::assistant(&text));
         }
-        Err(e) => {
-            eprintln!("LLM error: {e}");
-            println!("I encountered an error processing your request.");
+        Err(err) => {
+            tracing::error!("LLM error: {err}");
+            tracing::info!("I encountered an error processing your request.");
         }
     }
 
     ReactState { is_complete: true }
 }
 
-/// ReAct agent implementing the Reasoning + Acting pattern.
+/// `ReAct` agent implementing the Reasoning + Acting pattern.
 #[derive(Debug, Clone, Default)]
 pub struct ReActAgent;
 
