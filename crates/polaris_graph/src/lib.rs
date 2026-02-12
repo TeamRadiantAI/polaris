@@ -70,7 +70,7 @@ pub mod prelude {
     pub use crate::executor::{
         ExecutionError, ExecutionResult, GraphExecutor, ResourceValidationError,
     };
-    pub use crate::graph::{Graph, ValidationError};
+    pub use crate::graph::{Graph, ValidationError, ValidationWarning};
     pub use crate::node::{
         DecisionNode, JoinNode, LoopNode, Node, NodeId, ParallelNode, SwitchNode, SystemNode,
     };
@@ -83,5 +83,5 @@ pub mod prelude {
 // Re-export key types at crate root for convenience
 pub use dev::{DevToolsPlugin, SystemInfo};
 pub use executor::{ExecutionError, ExecutionResult, GraphExecutor, ResourceValidationError};
-pub use graph::{Graph, ValidationError};
+pub use graph::{Graph, ValidationError, ValidationWarning};
 pub use node::NodeId;

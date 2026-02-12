@@ -8,7 +8,7 @@
 //! - Loop node requirements
 //! - Error display formatting
 
-use polaris_graph::graph::{Graph, ValidationError};
+use polaris_graph::graph::{Graph, ValidationError, ValidationWarning};
 use polaris_graph::node::NodeId;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,4 +195,119 @@ fn validation_error_no_termination_condition_display() {
 fn validation_error_implements_error_trait() {
     fn assert_error<E: core::error::Error>() {}
     assert_error::<ValidationError>();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parallel Output Conflict Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn validate_parallel_conflicting_outputs_warns() {
+    // Both branches produce the same output type (i32)
+    let mut graph = Graph::new();
+    graph.add_parallel(
+        "conflict",
+        vec![
+            |g: &mut Graph| {
+                g.add_system(branch_a);
+            },
+            |g: &mut Graph| {
+                g.add_system(branch_b);
+            },
+        ],
+    );
+
+    let warnings = graph
+        .validate()
+        .expect("graph should be structurally valid");
+    assert!(
+        warnings
+            .iter()
+            .any(|w| matches!(w, ValidationWarning::ConflictingParallelOutputs { .. })),
+        "expected ConflictingParallelOutputs warning, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn validate_parallel_different_outputs_no_warning() {
+    // Branches produce different output types (i32 vs String)
+    async fn string_branch() -> String {
+        "hello".to_string()
+    }
+
+    let mut graph = Graph::new();
+    graph.add_parallel(
+        "no_conflict",
+        vec![
+            |g: &mut Graph| {
+                g.add_system(branch_a);
+            },
+            |g: &mut Graph| {
+                g.add_system(string_branch);
+            },
+        ],
+    );
+
+    let warnings = graph
+        .validate()
+        .expect("graph should be structurally valid");
+    assert!(
+        warnings.is_empty(),
+        "expected no warnings, got: {warnings:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Loop Predicate Output Validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn validate_loop_predicate_output_not_produced() {
+    #[derive(Debug)]
+    struct LoopState {
+        done: bool,
+    }
+
+    // Loop predicate reads LoopState, but body only produces i32
+    let mut graph = Graph::new();
+    graph.add_loop::<LoopState, _, _>(
+        "bad_loop",
+        |state| state.done,
+        |g| {
+            g.add_system(loop_body); // produces i32, not LoopState
+        },
+    );
+
+    let errors = graph.validate().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::LoopPredicateOutputNotProduced { .. })),
+        "expected LoopPredicateOutputNotProduced error, got: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_loop_predicate_output_produced() {
+    #[derive(Debug)]
+    struct LoopState {
+        done: bool,
+    }
+
+    async fn produce_loop_state() -> LoopState {
+        LoopState { done: true }
+    }
+
+    // Loop predicate reads LoopState, body produces LoopState
+    let mut graph = Graph::new();
+    graph.add_loop::<LoopState, _, _>(
+        "good_loop",
+        |state| state.done,
+        |g| {
+            g.add_system(produce_loop_state);
+        },
+    );
+
+    let result = graph.validate();
+    assert!(result.is_ok(), "Validation failed: {:?}", result.err());
 }

@@ -35,7 +35,6 @@
 use core::any::TypeId;
 use core::fmt;
 use core::marker::PhantomData;
-
 use polaris_system::param::SystemContext;
 use polaris_system::resource::Output;
 

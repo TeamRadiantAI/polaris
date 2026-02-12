@@ -3,10 +3,9 @@
 //! Edges are the connections between nodes, defining control flow
 //! through the graph.
 
+use crate::node::NodeId;
 use core::fmt;
 use std::sync::Arc;
-
-use crate::node::NodeId;
 
 /// Unique identifier for an edge in the graph.
 ///

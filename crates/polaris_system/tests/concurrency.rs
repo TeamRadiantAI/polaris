@@ -4,11 +4,10 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
+use polaris_system::resource::{LocalResource, Resources};
 use std::sync::Arc;
 use std::sync::Barrier;
 use std::thread;
-
-use polaris_system::resource::{LocalResource, Resources};
 
 // Test resource types
 #[derive(Debug, PartialEq, Clone)]

@@ -53,15 +53,14 @@
 //! 4. **Run Loop** - Execute systems and call `plugin.update()` (Layer 2)
 //! 5. **Cleanup Phase** - Call `plugin.cleanup()` in reverse order
 
-use core::any::TypeId;
-use hashbrown::{HashMap, HashSet};
-
 use crate::api::API;
 use crate::param::SystemContext;
 use crate::plugin::{Plugin, PluginId, Plugins, ScheduleId};
 use crate::resource::{
     GlobalResource, LocalResource, Resource, ResourceRef, ResourceRefMut, Resources,
 };
+use core::any::TypeId;
+use hashbrown::{HashMap, HashSet};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Server

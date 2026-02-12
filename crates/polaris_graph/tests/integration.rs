@@ -570,6 +570,83 @@ async fn parallel_diamond_execution() {
     assert_eq!(output.value, 100);
 }
 
+/// Tests that outputs produced in parallel branches are visible after the join.
+#[tokio::test]
+async fn parallel_outputs_visible_after_join() {
+    #[derive(Debug, Clone)]
+    struct BranchAOutput {
+        value: i32,
+    }
+
+    #[derive(Debug, Clone)]
+    struct BranchBOutput {
+        label: &'static str,
+    }
+
+    async fn branch_a_sys() -> BranchAOutput {
+        BranchAOutput { value: 42 }
+    }
+
+    async fn branch_b_sys() -> BranchBOutput {
+        BranchBOutput { label: "hello" }
+    }
+
+    /// System after join that reads outputs from both branches.
+    struct ReadBranchOutputs;
+
+    impl System for ReadBranchOutputs {
+        type Output = DiamondResult;
+
+        fn run<'a>(
+            &'a self,
+            ctx: &'a SystemContext<'_>,
+        ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
+            Box::pin(async move {
+                use polaris_system::param::{Out, SystemParam};
+
+                let a = Out::<BranchAOutput>::fetch(ctx)?;
+                let b = Out::<BranchBOutput>::fetch(ctx)?;
+
+                Ok(DiamondResult {
+                    step: "after_join",
+                    value: a.value + b.label.len() as i32,
+                })
+            })
+        }
+
+        fn name(&self) -> &'static str {
+            "read_branch_outputs"
+        }
+    }
+
+    let server = Server::new();
+
+    let mut graph = Graph::new();
+    graph
+        .add_parallel(
+            "fork",
+            vec![
+                |g: &mut Graph| {
+                    g.add_system(branch_a_sys);
+                },
+                |g: &mut Graph| {
+                    g.add_system(branch_b_sys);
+                },
+            ],
+        )
+        .add_boxed_system(Box::new(ReadBranchOutputs));
+
+    let mut ctx = server.create_context();
+    let executor = GraphExecutor::new();
+
+    let result = executor.execute(&graph, &mut ctx, None).await;
+    assert!(result.is_ok(), "Execution failed: {:?}", result.err());
+
+    let output = ctx.get_output::<DiamondResult>().unwrap();
+    assert_eq!(output.step, "after_join");
+    assert_eq!(output.value, 42 + 5); // 42 + len("hello")
+}
+
 /// Tests conditional diverge/converge execution:
 /// `decision` -> (true) -> `true_step` -> converge
 #[tokio::test]

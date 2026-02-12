@@ -3,14 +3,12 @@
 //! Nodes are the vertices in a graph, representing units of computation
 //! or control flow decisions.
 
+use crate::predicate::BoxedPredicate;
 use core::any::TypeId;
 use core::fmt;
-use std::sync::Arc;
-
 use polaris_system::resource::LocalResource;
 use polaris_system::system::{BoxedSystem, ErasedSystem};
-
-use crate::predicate::BoxedPredicate;
+use std::sync::Arc;
 
 /// Unique identifier for a node in the graph.
 ///

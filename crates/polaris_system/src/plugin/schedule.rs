@@ -30,7 +30,6 @@
 //! ```
 
 use core::any::TypeId;
-
 use variadics_please::all_tuples;
 
 /// Identifier for a tick schedule, based on a marker type.

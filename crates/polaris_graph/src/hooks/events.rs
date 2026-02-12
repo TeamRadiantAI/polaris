@@ -20,9 +20,8 @@
 //! }
 //! ```
 
-use core::time::Duration;
-
 use crate::{ExecutionError, node::NodeId};
+use core::time::Duration;
 
 /// Unified event enum for all graph execution hooks.
 ///
