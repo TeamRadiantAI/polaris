@@ -1,13 +1,12 @@
 //! AWS Bedrock [`LlmProvider`] implementation.
 
+use super::request::{build_output_config, build_tool_config, convert_message};
+use super::response::convert_response;
 use async_trait::async_trait;
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::types as bedrock;
 use polaris_models::llm::{GenerationError, GenerationRequest, GenerationResponse, LlmProvider};
 use std::sync::Arc;
-
-use super::request::{build_output_config, build_tool_config, convert_message};
-use super::response::convert_response;
 
 /// AWS Bedrock [`LlmProvider`] implementation.
 pub struct BedrockProvider {

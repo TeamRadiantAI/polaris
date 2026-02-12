@@ -48,11 +48,9 @@
 
 mod schedule;
 
-pub use schedule::{IntoScheduleIds, Schedule, ScheduleId};
-
-use core::any::TypeId;
-
 use crate::server::Server;
+use core::any::TypeId;
+pub use schedule::{IntoScheduleIds, Schedule, ScheduleId};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PluginId

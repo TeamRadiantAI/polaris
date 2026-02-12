@@ -3,10 +3,9 @@
 //! These types match the Anthropic API specification.
 //! See: <https://docs.anthropic.com/en/api/messages>
 
+use crate::schema::normalize_schema_for_strict_mode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use crate::schema::normalize_schema_for_strict_mode;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request Types

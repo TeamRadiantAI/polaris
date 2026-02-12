@@ -491,6 +491,16 @@ impl<'parent> SystemContext<'parent> {
     pub fn outputs_mut(&mut self) -> &mut Outputs {
         &mut self.outputs
     }
+
+    /// Takes ownership of this context's outputs, replacing them with an empty container.
+    ///
+    /// This is used to extract outputs from child contexts (e.g., after parallel
+    /// branch execution) before dropping them, so outputs can be merged into the
+    /// parent context without borrow conflicts.
+    #[must_use]
+    pub fn take_outputs(&mut self) -> Outputs {
+        core::mem::take(&mut self.outputs)
+    }
 }
 
 /// Immutable access to a resource.
@@ -1305,5 +1315,32 @@ mod tests {
     fn unit_declares_empty_access() {
         let access = <()>::access();
         assert!(access.is_empty());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // take_outputs + merge pattern tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn take_outputs_and_merge_into_parent() {
+        let mut parent = SystemContext::new();
+        parent.insert_output(ReasoningResult {
+            action: "parent".into(),
+        });
+
+        // Simulate parallel branch: create child, produce output, extract, drop, merge
+        let child_outputs = {
+            let mut child = parent.child();
+            child.insert_output(ReasoningResult {
+                action: "child".into(),
+            });
+            child.take_outputs()
+        };
+        // child is dropped here, releasing borrow on parent
+
+        parent.outputs_mut().merge_from(child_outputs);
+
+        let output = parent.get_output::<ReasoningResult>().unwrap();
+        assert_eq!(output.action, "child");
     }
 }

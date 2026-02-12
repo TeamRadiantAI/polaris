@@ -40,13 +40,12 @@
 //! The `#[system]` macro transforms async functions into the required `BoxFuture` signature
 //! to satisfy HRTB (Higher-Ranked Trait Bounds) for lifetime-parameterized parameters.
 
+use crate::param::{ParamError, SystemAccess, SystemContext};
+use crate::resource::Output;
 use core::any::{Any, TypeId};
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
-
-use crate::param::{ParamError, SystemAccess, SystemContext};
-use crate::resource::Output;
 
 /// Errors that can occur during system execution.
 #[derive(Debug, thiserror::Error)]

@@ -3,13 +3,14 @@
 //! The `Graph` is the core data structure representing an agent's behavior
 //! as a directed graph of systems and control flow constructs.
 
-use hashbrown::HashSet;
-
 use crate::edge::{Edge, EdgeId, ErrorEdge, SequentialEdge, TimeoutEdge};
 use crate::node::{
     DecisionNode, JoinNode, LoopNode, Node, NodeId, ParallelNode, SwitchNode, SystemNode,
 };
 use crate::predicate::Predicate;
+use core::any::TypeId;
+use core::fmt;
+use hashbrown::{HashMap, HashSet};
 use polaris_system::resource::Output;
 use polaris_system::system::IntoSystem;
 
@@ -707,6 +708,97 @@ impl Graph {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Graph Analysis
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Returns all nodes reachable from `entry` within a subgraph.
+    ///
+    /// Performs a DFS following sequential edges and control-flow internal
+    /// links (decision branches, switch cases, loop bodies, nested parallel
+    /// branches + join nodes). Uses a visited set to handle cycles.
+    ///
+    /// Subgraph boundaries are naturally respected: branch subgraphs built
+    /// by the builder are self-contained (their terminal nodes have no
+    /// outgoing sequential edges to the parent graph).
+    fn reachable_nodes(&self, entry: &NodeId) -> Vec<&Node> {
+        let mut visited = HashSet::new();
+        let mut result = Vec::new();
+        let mut stack = vec![entry.clone()];
+
+        while let Some(current) = stack.pop() {
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            let Some(node) = self.get_node(current.clone()) else {
+                continue;
+            };
+
+            result.push(node);
+
+            // Follow control-flow internal links into subgraphs.
+            // For Parallel, we must also push the join node since the
+            // executor transitions to the join via the node's `join` field
+            // rather than a sequential edge from the parallel node.
+            match node {
+                Node::Decision(dec) => {
+                    if let Some(t) = &dec.true_branch {
+                        stack.push(t.clone());
+                    }
+                    if let Some(f) = &dec.false_branch {
+                        stack.push(f.clone());
+                    }
+                }
+                Node::Switch(sw) => {
+                    for (_, target) in &sw.cases {
+                        stack.push(target.clone());
+                    }
+                    if let Some(d) = &sw.default {
+                        stack.push(d.clone());
+                    }
+                }
+                Node::Loop(lp) => {
+                    if let Some(body) = &lp.body_entry {
+                        stack.push(body.clone());
+                    }
+                }
+                Node::Parallel(par) => {
+                    for branch in &par.branches {
+                        stack.push(branch.clone());
+                    }
+                    if let Some(join) = &par.join {
+                        stack.push(join.clone());
+                    }
+                }
+                Node::System(_) | Node::Join(_) => {}
+            }
+
+            // Follow sequential edges from this node
+            for edge in &self.edges {
+                if let Edge::Sequential(seq) = edge
+                    && seq.from == current
+                {
+                    stack.push(seq.to.clone());
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Collects output types produced by all system nodes reachable from `entry`.
+    ///
+    /// Returns `(TypeId, type_name)` pairs for each system node in the subgraph.
+    fn collect_branch_output_types(&self, entry: &NodeId) -> Vec<(TypeId, &'static str)> {
+        self.reachable_nodes(entry)
+            .into_iter()
+            .filter_map(|node| match node {
+                Node::System(sys) => Some((sys.output_type_id(), sys.output_type_name())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Validation API
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -719,25 +811,37 @@ impl Graph {
     /// - Ensures loop nodes have termination conditions
     /// - Ensures parallel nodes have branches and join targets
     /// - Ensures switch nodes have discriminators
+    /// - Warns if parallel branches produce overlapping output types
+    /// - Errors if a loop predicate reads an output type no body system produces
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the graph is valid, or a vector of validation errors.
+    /// Returns `Ok(warnings)` if the graph is structurally valid (warnings may be
+    /// empty), or `Err(errors)` for structural issues that would cause runtime failures.
     ///
     /// # Example
     ///
     /// ```ignore
+    ///
     /// let mut graph = Graph::new();
     /// graph.add_system(my_system);
     ///
-    /// if let Err(errors) = graph.validate() {
-    ///     for error in errors {
-    ///         eprintln!("Validation error: {error}");
+    /// match graph.validate() {
+    ///     Ok(warnings) => {
+    ///         for w in &warnings {
+    ///             tracing::warn!(%w, "graph validation warning");
+    ///         }
+    ///     }
+    ///     Err(errors) => {
+    ///         for err in &errors {
+    ///             tracing::error!(%err, "graph validation error");
+    ///         }
     ///     }
     /// }
     /// ```
-    pub fn validate(&self) -> Result<(), Vec<ValidationError>> {
+    pub fn validate(&self) -> Result<Vec<ValidationWarning>, Vec<ValidationError>> {
         let mut errors = Vec::new();
+        let mut warnings = Vec::new();
 
         // Check for entry point
         if self.entry.is_none() {
@@ -761,11 +865,11 @@ impl Graph {
 
         // Validate each node
         for node in &self.nodes {
-            self.validate_node(node, &valid_nodes, &mut errors);
+            self.validate_node(node, &valid_nodes, &mut errors, &mut warnings);
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(warnings)
         } else {
             Err(errors)
         }
@@ -950,6 +1054,7 @@ impl Graph {
         node: &Node,
         valid_nodes: &HashSet<NodeId>,
         errors: &mut Vec<ValidationError>,
+        warnings: &mut Vec<ValidationWarning>,
     ) {
         match node {
             // System nodes are always valid - they just wrap a boxed system
@@ -1058,6 +1163,32 @@ impl Graph {
                         target: join.clone(),
                     });
                 }
+
+                // Check for overlapping output types across parallel branches.
+                // If 2+ branches produce the same type, the last branch in
+                // declaration order silently wins at merge time.
+                let mut type_counts: HashMap<TypeId, (usize, &'static str)> = HashMap::new();
+                for branch in &par.branches {
+                    let branch_types: HashSet<_> = self
+                        .collect_branch_output_types(branch)
+                        .into_iter()
+                        .collect();
+                    for (type_id, type_name) in branch_types {
+                        type_counts
+                            .entry(type_id)
+                            .and_modify(|(count, _)| *count += 1)
+                            .or_insert((1, type_name));
+                    }
+                }
+                for (_, (count, type_name)) in type_counts {
+                    if count > 1 {
+                        warnings.push(ValidationWarning::ConflictingParallelOutputs {
+                            node: par.id.clone(),
+                            name: par.name,
+                            output_type: type_name,
+                        });
+                    }
+                }
             }
 
             // Loop nodes need a termination condition and a body
@@ -1082,7 +1213,28 @@ impl Graph {
                         target: body.clone(),
                     });
                 }
-                // Note: exit is optional - the executor will use sequential edge if not set
+
+                // If a termination predicate exists and the body is valid,
+                // check that the predicate's input type is actually produced
+                // by a system in the loop body.
+                if let Some(term) = &lp.termination
+                    && let Some(body) = &lp.body_entry
+                    && valid_nodes.contains(body)
+                {
+                    let predicate_input = term.input_type_id();
+                    let body_output_types: HashSet<TypeId> = self
+                        .collect_branch_output_types(body)
+                        .into_iter()
+                        .map(|(id, _)| id)
+                        .collect();
+                    if !body_output_types.contains(&predicate_input) {
+                        errors.push(ValidationError::LoopPredicateOutputNotProduced {
+                            node: lp.id.clone(),
+                            name: lp.name,
+                            expected_output: term.input_type_name(),
+                        });
+                    }
+                }
             }
 
             // Join nodes need sources to aggregate
@@ -1105,6 +1257,43 @@ impl Graph {
         }
     }
 }
+
+/// Warnings produced during graph validation.
+///
+/// Warnings indicate potential issues that won't prevent execution but may
+/// cause unexpected behavior at runtime.
+#[derive(Debug, Clone)]
+pub enum ValidationWarning {
+    /// Two or more parallel branches produce the same output type.
+    /// The last branch in declaration order will win at merge time.
+    ConflictingParallelOutputs {
+        /// The parallel node ID.
+        node: NodeId,
+        /// The parallel node name.
+        name: &'static str,
+        /// The conflicting output type name.
+        output_type: &'static str,
+    },
+}
+
+impl fmt::Display for ValidationWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValidationWarning::ConflictingParallelOutputs {
+                name,
+                node,
+                output_type,
+            } => {
+                write!(
+                    f,
+                    "parallel node '{name}' ({node}) has multiple branches producing output type '{output_type}'; last branch wins"
+                )
+            }
+        }
+    }
+}
+
+impl core::error::Error for ValidationWarning {}
 
 /// Errors that can occur during graph validation.
 ///
@@ -1241,10 +1430,20 @@ pub enum ValidationError {
         /// The invalid source node ID.
         source: NodeId,
     },
+    /// A loop's termination predicate reads an output type that no system in
+    /// the loop body produces.
+    LoopPredicateOutputNotProduced {
+        /// The loop node ID.
+        node: NodeId,
+        /// The loop node name.
+        name: &'static str,
+        /// The output type the predicate expects.
+        expected_output: &'static str,
+    },
 }
 
-impl core::fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ValidationError::NoEntryPoint => write!(f, "graph has no entry point"),
             ValidationError::InvalidEntryPoint(id) => {
@@ -1330,6 +1529,16 @@ impl core::fmt::Display for ValidationError {
                 write!(
                     f,
                     "join node {node} has source pointing to invalid node: {source}"
+                )
+            }
+            ValidationError::LoopPredicateOutputNotProduced {
+                node,
+                name,
+                expected_output,
+            } => {
+                write!(
+                    f,
+                    "loop node '{name}' ({node}) predicate expects output type '{expected_output}' not produced by any system in the loop body"
                 )
             }
         }

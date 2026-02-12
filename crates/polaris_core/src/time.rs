@@ -35,14 +35,12 @@
 //! server.finish();
 //! ```
 
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
+use crate::ServerInfoPlugin;
 use polaris_system::plugin::{Plugin, PluginId};
 use polaris_system::resource::{GlobalResource, LocalResource};
 use polaris_system::server::Server;
-
-use crate::ServerInfoPlugin;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClockProvider Trait

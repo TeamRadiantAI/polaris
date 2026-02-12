@@ -9,8 +9,6 @@
     reason = "shared test utilities — not all items used in every test binary"
 )]
 
-use std::sync::{Arc, Mutex};
-
 use polaris_graph::dev::{DevToolsPlugin, SystemInfo};
 use polaris_graph::graph::Graph;
 use polaris_graph::hooks::HooksAPI;
@@ -20,6 +18,7 @@ use polaris_system::plugin::Plugin;
 use polaris_system::resource::LocalResource;
 use polaris_system::server::Server;
 use polaris_system::system::{BoxFuture, System, SystemError};
+use std::sync::{Arc, Mutex};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST SERVER SETUP

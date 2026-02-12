@@ -5,10 +5,9 @@
 
 mod test_utils;
 
-use std::sync::{Arc, Mutex};
-
 use polaris_graph::executor::{ExecutionError, GraphExecutor};
 use polaris_graph::graph::Graph;
+use std::sync::{Arc, Mutex};
 use test_utils::{
     ConsumerSystem, DecisionOutput, DecisionSystem, FailingSystem, FlagSystem, HandlerLog,
     HandlerSystem, InitialStateSystem, LoopIterationSystem, LoopState, ProducerOutput,

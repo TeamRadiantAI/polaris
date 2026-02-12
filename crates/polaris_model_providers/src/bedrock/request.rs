@@ -1,14 +1,12 @@
 //! Polaris to Bedrock request conversions.
 
-use aws_sdk_bedrockruntime::types as bedrock;
-use polaris_models::llm::{self as polaris_llm, GenerationError, GenerationRequest};
-
-use crate::schema::normalize_schema_for_strict_mode;
-
 use super::types::{
     convert_document_format, convert_image_format, convert_tool_result_status,
     decode_base64_source, json_to_document,
 };
+use crate::schema::normalize_schema_for_strict_mode;
+use aws_sdk_bedrockruntime::types as bedrock;
+use polaris_models::llm::{self as polaris_llm, GenerationError, GenerationRequest};
 
 // -----------------------------------------------------------------------------
 // Message conversions

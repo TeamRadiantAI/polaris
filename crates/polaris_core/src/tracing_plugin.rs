@@ -33,17 +33,15 @@
 //! server.finish();
 //! ```
 
+use crate::ServerInfoPlugin;
+use polaris_system::plugin::{Plugin, PluginId};
+use polaris_system::resource::GlobalResource;
+use polaris_system::server::Server;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-
-use polaris_system::plugin::{Plugin, PluginId};
-use polaris_system::resource::GlobalResource;
-use polaris_system::server::Server;
-
-use crate::ServerInfoPlugin;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TracingFormat

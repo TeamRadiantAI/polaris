@@ -18,15 +18,6 @@
 //! let result = executor.execute(&graph, &ctx, None).await?;
 //! ```
 
-use core::any::TypeId;
-use core::fmt;
-use core::time::Duration;
-
-use polaris_system::param::{AccessMode, SystemAccess, SystemContext};
-use polaris_system::plugin::{Schedule, ScheduleId};
-
-use hashbrown::HashSet;
-
 use crate::edge::Edge;
 use crate::graph::Graph;
 use crate::hooks::HooksAPI;
@@ -38,6 +29,12 @@ use crate::hooks::schedule::{
 };
 use crate::node::{LoopNode, Node, NodeId, ParallelNode, SwitchNode};
 use crate::predicate::PredicateError;
+use core::any::TypeId;
+use core::fmt;
+use core::time::Duration;
+use hashbrown::HashSet;
+use polaris_system::param::{AccessMode, SystemAccess, SystemContext};
+use polaris_system::plugin::{Schedule, ScheduleId};
 
 /// Default case name for switch nodes when no match is found.
 pub const DEFAULT_SWITCH_CASE: &str = "default";
@@ -659,6 +656,17 @@ impl GraphExecutor {
 
             let results = try_join_all(futures).await?;
             let total_nodes = results.iter().sum();
+
+            // Merge outputs from child contexts back to parent (branch-order deterministic).
+            // Extract outputs first, then drop children to release borrow on ctx.
+            let child_outputs: Vec<_> = child_contexts
+                .iter_mut()
+                .map(SystemContext::take_outputs)
+                .collect();
+            drop(child_contexts);
+            for outputs in child_outputs {
+                ctx.outputs_mut().merge_from(outputs);
+            }
 
             // Invoke OnParallelComplete hook
             Self::invoke_hook::<OnParallelComplete>(

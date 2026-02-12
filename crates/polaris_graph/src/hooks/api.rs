@@ -49,18 +49,16 @@
 //! })?;
 //! ```
 
+use super::events::GraphEvent;
 use core::any::TypeId;
 use core::fmt;
-use std::sync::Arc;
-
 use hashbrown::HashMap;
 use parking_lot::RwLock;
 use polaris_system::api::API;
 use polaris_system::param::SystemContext;
 use polaris_system::plugin::{IntoScheduleIds, ScheduleId};
 use polaris_system::resource::LocalResource;
-
-use super::events::GraphEvent;
+use std::sync::Arc;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BoxedHook

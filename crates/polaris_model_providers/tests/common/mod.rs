@@ -1,8 +1,5 @@
 //! Shared test helpers for provider integration tests.
 
-use std::future::Future;
-use std::sync::Once;
-
 use polaris_models::llm::{
     AssistantBlock, GenerationRequest, GenerationResponse, ImageMediaType, Llm, Message, ToolCall,
     ToolChoice, ToolDefinition, UserBlock,
@@ -10,6 +7,8 @@ use polaris_models::llm::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::future::Future;
+use std::sync::Once;
 
 static INIT: Once = Once::new();
 
