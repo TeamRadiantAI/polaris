@@ -21,7 +21,7 @@ for<'w> F: Fn(Res<'w, T>) -> BoxFuture<'w, O>
 The `#[system]` macro generates a struct that implements `System` directly, bypassing the HRTB limitation:
 
 ```rust
-use system_macros::system;
+use polaris_system_macros::system;
 
 #[system]
 async fn read_counter(counter: Res<Counter>) -> Output {
@@ -59,8 +59,8 @@ fn read_counter() -> ReadCounterSystem {
 ## Usage
 
 ```rust
-use system_macros::system;
 use polaris_system::param::{Res, ResMut, Out};
+use polaris_system::system; // Macro is re-exported from polaris_system for convenience
 
 // Single parameter
 #[system]

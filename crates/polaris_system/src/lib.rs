@@ -61,7 +61,7 @@ pub mod server;
 pub mod system;
 
 /// Re-export the `#[system]` attribute macro.
-pub use system_macros::system;
+pub use polaris_system_macros::system;
 
 /// Re-export all common types for easy access.
 pub mod prelude {

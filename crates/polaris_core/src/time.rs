@@ -10,8 +10,8 @@
 //! use std::time::Duration;
 //! use polaris_system::server::Server;
 //! use polaris_system::param::{Res, ResMut};
+//! use polaris_system::system;
 //! use polaris_core::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
-//! use system_macros::system;
 //!
 //! // A system that tracks execution time
 //! #[system]
@@ -102,8 +102,8 @@ impl ClockProvider for SystemClock {
 /// ```ignore
 /// use std::time::Instant;
 /// use polaris_system::param::Res;
+/// use polaris_system::system;
 /// use polaris_core::Clock;
-/// use system_macros::system;
 ///
 /// #[system]
 /// async fn measure_operation(clock: Res<Clock>) {
@@ -173,8 +173,8 @@ impl Default for Clock {
 ///
 /// ```ignore
 /// use polaris_system::param::ResMut;
+/// use polaris_system::system;
 /// use polaris_core::Stopwatch;
-/// use system_macros::system;
 ///
 /// #[system]
 /// async fn multi_step_operation(mut stopwatch: ResMut<Stopwatch>) {
@@ -267,8 +267,8 @@ impl Default for Stopwatch {
 /// ```ignore
 /// use polaris_system::server::Server;
 /// use polaris_system::param::{Res, ResMut};
+/// use polaris_system::system;
 /// use polaris_core::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
-/// use system_macros::system;
 ///
 /// #[system]
 /// async fn timed_system(

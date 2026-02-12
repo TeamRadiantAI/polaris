@@ -9,7 +9,7 @@ keywords = []
 workspace = true
 
 [dependencies]
-system_macros = { path = "system_macros" }
+polaris_system_macros = { path = "system_macros", version = "0.0.1" }
 downcast-rs = "2.0.2"
 parking_lot = { version = "0.12.5", features = ["send_guard"] }
 thiserror = "2.0.17"

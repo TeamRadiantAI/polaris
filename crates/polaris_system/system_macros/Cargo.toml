@@ -1,5 +1,5 @@
 [package]
-name = "system_macros"
+name = "polaris_system_macros"
 version = "0.0.1"
 description = "Macros for polaris_system crate."
 edition = "2024"

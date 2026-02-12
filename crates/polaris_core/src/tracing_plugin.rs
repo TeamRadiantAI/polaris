@@ -8,8 +8,8 @@
 //! ```ignore
 //! use polaris_system::server::Server;
 //! use polaris_system::param::Res;
+//! use polaris_system::system;
 //! use polaris_core::{ServerInfoPlugin, TracingPlugin, TracingConfig, TracingFormat};
-//! use system_macros::system;
 //! use tracing::Level;
 //!
 //! #[system]
@@ -77,8 +77,8 @@ pub enum TracingFormat {
 ///
 /// ```ignore
 /// use polaris_system::param::Res;
+/// use polaris_system::system;
 /// use polaris_core::TracingConfig;
-/// use system_macros::system;
 /// use tracing::Level;
 ///
 /// #[system]

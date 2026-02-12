@@ -8,7 +8,7 @@
 //! ```ignore
 //! use polaris_graph::dev::SystemInfo;
 //! use polaris_system::param::Res;
-//! use system_macros::system;
+//! use polaris_system::system;
 //!
 //! #[system]
 //! async fn my_system(info: Res<SystemInfo>) {
