@@ -1,30 +1,54 @@
-//! Node types for agent graphs.
+//! Node types for graphs.
 //!
-//! Nodes are the vertices in an agent graph, representing units of computation
+//! Nodes are the vertices in a graph, representing units of computation
 //! or control flow decisions.
 
 use core::any::TypeId;
 use core::fmt;
+use std::sync::Arc;
 
+use polaris_system::resource::LocalResource;
 use polaris_system::system::{BoxedSystem, ErasedSystem};
 
 use crate::predicate::BoxedPredicate;
 
 /// Unique identifier for a node in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(pub(crate) usize);
+///
+/// Node IDs are generated using nanoid, providing globally unique identifiers
+/// that don't require coordination between graph instances. This enables
+/// merging graphs without ID collision handling.
+///
+/// Internally uses `Arc<str>` for cheap cloning (reference count bump only).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NodeId(Arc<str>);
+
+impl LocalResource for NodeId {}
 
 impl NodeId {
-    /// Creates a new node ID.
+    /// Creates a new node ID with a unique nanoid.
     #[must_use]
-    pub fn new(id: usize) -> Self {
-        Self(id)
+    pub fn new() -> Self {
+        Self(nanoid::nanoid!().into())
     }
 
-    /// Returns the raw ID value.
+    /// Creates a node ID from a specific string value.
+    ///
+    /// This is primarily useful for testing or when restoring serialized graphs.
     #[must_use]
-    pub fn index(&self) -> usize {
-        self.0
+    pub fn from_string(id: impl Into<Arc<str>>) -> Self {
+        Self(id.into())
+    }
+
+    /// Returns the ID as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for NodeId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -34,7 +58,7 @@ impl fmt::Display for NodeId {
     }
 }
 
-/// A node in the agent graph.
+/// A node in the graph.
 ///
 /// Each node represents either a computation unit (system) or a control flow
 /// construct (decision, loop, parallel execution).
@@ -59,12 +83,12 @@ impl Node {
     #[must_use]
     pub fn id(&self) -> NodeId {
         match self {
-            Node::System(n) => n.id,
-            Node::Decision(n) => n.id,
-            Node::Switch(n) => n.id,
-            Node::Parallel(n) => n.id,
-            Node::Loop(n) => n.id,
-            Node::Join(n) => n.id,
+            Node::System(n) => n.id.clone(),
+            Node::Decision(n) => n.id.clone(),
+            Node::Switch(n) => n.id.clone(),
+            Node::Parallel(n) => n.id.clone(),
+            Node::Loop(n) => n.id.clone(),
+            Node::Join(n) => n.id.clone(),
         }
     }
 
@@ -99,9 +123,9 @@ pub struct SystemNode {
 impl SystemNode {
     /// Creates a new system node from any type implementing [`ErasedSystem`].
     #[must_use]
-    pub fn new<S: ErasedSystem>(id: NodeId, system: S) -> Self {
+    pub fn new<S: ErasedSystem>(system: S) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             system: Box::new(system),
             timeout: None,
         }
@@ -109,9 +133,9 @@ impl SystemNode {
 
     /// Creates a new system node from an already-boxed system.
     #[must_use]
-    pub fn new_boxed(id: NodeId, system: BoxedSystem) -> Self {
+    pub fn new_boxed(system: BoxedSystem) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             system,
             timeout: None,
         }
@@ -173,9 +197,9 @@ pub struct DecisionNode {
 impl DecisionNode {
     /// Creates a new decision node.
     #[must_use]
-    pub fn new(id: NodeId, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             predicate: None,
             true_branch: None,
@@ -185,9 +209,9 @@ impl DecisionNode {
 
     /// Creates a new decision node with a predicate.
     #[must_use]
-    pub fn with_predicate(id: NodeId, name: &'static str, predicate: BoxedPredicate) -> Self {
+    pub fn with_predicate(name: &'static str, predicate: BoxedPredicate) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             predicate: Some(predicate),
             true_branch: None,
@@ -228,9 +252,9 @@ pub struct SwitchNode {
 impl SwitchNode {
     /// Creates a new switch node.
     #[must_use]
-    pub fn new(id: NodeId, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             discriminator: None,
             cases: Vec::new(),
@@ -241,12 +265,11 @@ impl SwitchNode {
     /// Creates a new switch node with a discriminator.
     #[must_use]
     pub fn with_discriminator(
-        id: NodeId,
         name: &'static str,
         discriminator: crate::predicate::BoxedDiscriminator,
     ) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             discriminator: Some(discriminator),
             cases: Vec::new(),
@@ -286,9 +309,9 @@ pub struct ParallelNode {
 impl ParallelNode {
     /// Creates a new parallel node.
     #[must_use]
-    pub fn new(id: NodeId, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             branches: Vec::new(),
             join: None,
@@ -317,9 +340,9 @@ pub struct LoopNode {
 impl LoopNode {
     /// Creates a new loop node.
     #[must_use]
-    pub fn new(id: NodeId, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             termination: None,
             max_iterations: None,
@@ -329,9 +352,9 @@ impl LoopNode {
 
     /// Creates a new loop node with a termination predicate.
     #[must_use]
-    pub fn with_termination(id: NodeId, name: &'static str, termination: BoxedPredicate) -> Self {
+    pub fn with_termination(name: &'static str, termination: BoxedPredicate) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             termination: Some(termination),
             max_iterations: None,
@@ -341,9 +364,9 @@ impl LoopNode {
 
     /// Creates a new loop node with a maximum iteration count.
     #[must_use]
-    pub fn with_max_iterations(id: NodeId, name: &'static str, max_iterations: usize) -> Self {
+    pub fn with_max_iterations(name: &'static str, max_iterations: usize) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             termination: None,
             max_iterations: Some(max_iterations),
@@ -381,9 +404,9 @@ pub struct JoinNode {
 impl JoinNode {
     /// Creates a new join node.
     #[must_use]
-    pub fn new(id: NodeId, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
-            id,
+            id: NodeId::new(),
             name,
             sources: Vec::new(),
         }
@@ -405,57 +428,39 @@ mod tests {
     }
 
     #[test]
-    fn node_id_display() {
-        let id = NodeId::new(42);
-        assert_eq!(format!("{id}"), "node_42");
-    }
-
-    #[test]
-    fn node_id_equality() {
-        let id1 = NodeId::new(1);
-        let id2 = NodeId::new(1);
-        let id3 = NodeId::new(2);
-
-        assert_eq!(id1, id2);
-        assert_ne!(id1, id3);
+    fn node_id_uniqueness() {
+        // Generated IDs should be unique
+        let id1 = NodeId::new();
+        let id2 = NodeId::new();
+        assert_ne!(id1, id2);
     }
 
     #[test]
     fn system_node_creation() {
         let system = test_system.into_system();
-        let node = SystemNode::new(NodeId::new(0), system);
-        assert_eq!(node.id.index(), 0);
+        let node = SystemNode::new(system);
+        // ID is auto-generated, just check it exists
+        assert!(!node.id.as_str().is_empty());
         assert!(node.name().contains("test_system"));
     }
 
     #[test]
     fn node_enum_accessors() {
-        let system = Node::System(SystemNode::new(NodeId::new(1), sys_fn.into_system()));
-        assert_eq!(system.id().index(), 1);
+        let system = Node::System(SystemNode::new(sys_fn.into_system()));
+        assert!(!system.id().as_str().is_empty());
         assert!(system.name().contains("sys_fn"));
 
-        let decision = Node::Decision(DecisionNode::new(NodeId::new(2), "dec"));
-        assert_eq!(decision.id().index(), 2);
+        let decision = Node::Decision(DecisionNode::new("dec"));
+        assert!(!decision.id().as_str().is_empty());
         assert_eq!(decision.name(), "dec");
     }
 
     #[test]
     fn system_node_preserves_type_info() {
         let system = sys_fn.into_system();
-        let node = SystemNode::new(NodeId::new(0), system);
+        let node = SystemNode::new(system);
 
         assert_eq!(node.output_type_id(), TypeId::of::<i32>());
         assert!(node.output_type_name().contains("i32"));
-    }
-
-    #[test]
-    fn system_node_debug() {
-        let system = test_system.into_system();
-        let node = SystemNode::new(NodeId::new(42), system);
-        let debug_str = format!("{node:?}");
-
-        assert!(debug_str.contains("SystemNode"));
-        assert!(debug_str.contains("42"));
-        assert!(debug_str.contains("test_system"));
     }
 }

@@ -3,8 +3,7 @@
 //! The `Graph` is the core data structure representing an agent's behavior
 //! as a directed graph of systems and control flow constructs.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use hashbrown::HashSet;
 
 use crate::edge::{Edge, EdgeId, ErrorEdge, SequentialEdge, TimeoutEdge};
 use crate::node::{
@@ -14,68 +13,9 @@ use crate::predicate::Predicate;
 use polaris_system::resource::Output;
 use polaris_system::system::IntoSystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ID Allocator
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Shared allocator for generating unique node and edge IDs.
+/// A directed graph of systems.
 ///
-/// `IdAllocator` ensures that all nodes and edges in a graph (including nested
-/// subgraphs) receive globally unique IDs. It uses `Arc<AtomicUsize>` for
-/// thread-safe, lock-free ID generation.
-///
-/// # Example
-///
-/// ```ignore
-/// let allocator = IdAllocator::new();
-/// let id1 = allocator.allocate_node_id(); // NodeId(0)
-/// let id2 = allocator.allocate_node_id(); // NodeId(1)
-///
-/// // Clone shares the same counter
-/// let allocator2 = allocator.clone();
-/// let id3 = allocator2.allocate_node_id(); // NodeId(2)
-/// ```
-#[derive(Debug, Clone, Default)]
-pub struct IdAllocator {
-    next_node_id: Arc<AtomicUsize>,
-    next_edge_id: Arc<AtomicUsize>,
-}
-
-impl IdAllocator {
-    /// Creates a new ID allocator starting at 0.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Allocates the next unique node ID.
-    pub fn allocate_node_id(&self) -> NodeId {
-        let id = self.next_node_id.fetch_add(1, Ordering::Relaxed);
-        NodeId::new(id)
-    }
-
-    /// Allocates the next unique edge ID.
-    pub fn allocate_edge_id(&self) -> EdgeId {
-        let id = self.next_edge_id.fetch_add(1, Ordering::Relaxed);
-        EdgeId::new(id)
-    }
-
-    /// Returns the current node ID counter value (for debugging).
-    #[must_use]
-    pub fn current_node_id(&self) -> usize {
-        self.next_node_id.load(Ordering::Relaxed)
-    }
-
-    /// Returns the current edge ID counter value (for debugging).
-    #[must_use]
-    pub fn current_edge_id(&self) -> usize {
-        self.next_edge_id.load(Ordering::Relaxed)
-    }
-}
-
-/// A directed graph of systems defining agent behavior.
-///
-/// Graphs are the fundamental structure for composing agent behavior.
+/// Graphs are the fundamental structure for composing safe agentic behavior.
 /// Each graph contains:
 /// - **Nodes**: Computation units (systems) and control flow constructs
 /// - **Edges**: Connections defining execution flow between nodes
@@ -104,8 +44,6 @@ pub struct Graph {
     entry: Option<NodeId>,
     /// The last node added (for chaining).
     last_node: Option<NodeId>,
-    /// Shared allocator for unique node and edge IDs.
-    allocator: IdAllocator,
 }
 
 impl Graph {
@@ -113,22 +51,6 @@ impl Graph {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Creates a subgraph that shares this graph's ID allocator.
-    ///
-    /// This ensures that all nodes and edges in the subgraph receive
-    /// globally unique IDs, preventing collisions when the subgraph
-    /// is merged back into the parent.
-    #[must_use]
-    fn create_subgraph(&self) -> Self {
-        Self {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-            entry: None,
-            last_node: None,
-            allocator: self.allocator.clone(),
-        }
     }
 
     /// Returns all nodes in the graph.
@@ -146,7 +68,7 @@ impl Graph {
     /// Returns the entry point node ID, if set.
     #[must_use]
     pub fn entry(&self) -> Option<NodeId> {
-        self.entry
+        self.entry.clone()
     }
 
     /// Returns the number of nodes in the graph.
@@ -216,22 +138,22 @@ impl Graph {
         S: IntoSystem<M>,
         S::System: 'static,
     {
-        let id = self.allocate_node_id();
         let system = system.into_system();
-        let node = Node::System(SystemNode::new(id, system));
+        let node = Node::System(SystemNode::new(system));
+        let id = node.id();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(id);
+            self.entry = Some(id.clone());
         }
 
         self.nodes.push(node);
-        self.last_node = Some(id);
+        self.last_node = Some(id.clone());
         id
     }
 
@@ -268,21 +190,21 @@ impl Graph {
     ///
     /// The node ID of the newly added system node.
     pub fn add_boxed_system(&mut self, system: polaris_system::system::BoxedSystem) -> NodeId {
-        let id = self.allocate_node_id();
-        let node = Node::System(SystemNode::new_boxed(id, system));
+        let node = Node::System(SystemNode::new_boxed(system));
+        let id = node.id();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(id);
+            self.entry = Some(id.clone());
         }
 
         self.nodes.push(node);
-        self.last_node = Some(id);
+        self.last_node = Some(id.clone());
         id
     }
 
@@ -329,30 +251,30 @@ impl Graph {
         F1: FnOnce(&mut Graph),
         F2: FnOnce(&mut Graph),
     {
-        let decision_id = self.allocate_node_id();
         let boxed_predicate = Box::new(Predicate::<T, P>::new(predicate));
-        let mut decision = DecisionNode::with_predicate(decision_id, name, boxed_predicate);
+        let mut decision = DecisionNode::with_predicate(name, boxed_predicate);
+        let decision_id = decision.id.clone();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, decision_id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, decision_id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(decision_id);
+            self.entry = Some(decision_id.clone());
         }
 
-        // Build true branch (shares allocator for unique IDs)
-        let mut true_graph = self.create_subgraph();
+        // Build true branch
+        let mut true_graph = Graph::new();
         true_path(&mut true_graph);
 
         if let Some(entry) = true_graph.entry {
             decision.true_branch = Some(entry);
         }
 
-        // Build false branch (shares allocator for unique IDs)
-        let mut false_graph = self.create_subgraph();
+        // Build false branch
+        let mut false_graph = Graph::new();
         false_path(&mut false_graph);
 
         if let Some(entry) = false_graph.entry {
@@ -385,22 +307,22 @@ impl Graph {
         I: IntoIterator<Item = F>,
         F: FnOnce(&mut Graph),
     {
-        let parallel_id = self.allocate_node_id();
-        let mut parallel = ParallelNode::new(parallel_id, name);
+        let mut parallel = ParallelNode::new(name);
+        let parallel_id = parallel.id.clone();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, parallel_id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, parallel_id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(parallel_id);
+            self.entry = Some(parallel_id.clone());
         }
 
-        // Build each branch (all share the same allocator for unique IDs)
+        // Build each branch
         for branch_fn in branches {
-            let mut branch_graph = self.create_subgraph();
+            let mut branch_graph = Graph::new();
             branch_fn(&mut branch_graph);
 
             if let Some(entry) = branch_graph.entry {
@@ -413,13 +335,10 @@ impl Graph {
         }
 
         // Create join node
-        let join_id = self.allocate_node_id();
-        let join = JoinNode {
-            id: join_id,
-            name: "join",
-            sources: parallel.branches.clone(),
-        };
-        parallel.join = Some(join_id);
+        let mut join = JoinNode::new("join");
+        join.sources = parallel.branches.clone();
+        let join_id = join.id.clone();
+        parallel.join = Some(join_id.clone());
 
         // Add nodes
         self.nodes.push(Node::Parallel(parallel));
@@ -468,22 +387,22 @@ impl Graph {
         P: Fn(&T) -> bool + Send + Sync + 'static,
         F: FnOnce(&mut Graph),
     {
-        let loop_id = self.allocate_node_id();
         let boxed_termination = Box::new(Predicate::<T, P>::new(termination));
-        let mut loop_node = LoopNode::with_termination(loop_id, name, boxed_termination);
+        let mut loop_node = LoopNode::with_termination(name, boxed_termination);
+        let loop_id = loop_node.id.clone();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, loop_id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, loop_id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(loop_id);
+            self.entry = Some(loop_id.clone());
         }
 
-        // Build loop body (shares allocator for unique IDs)
-        let mut body_graph = self.create_subgraph();
+        // Build loop body
+        let mut body_graph = Graph::new();
         body(&mut body_graph);
 
         if let Some(entry) = body_graph.entry {
@@ -525,21 +444,21 @@ impl Graph {
     where
         F: FnOnce(&mut Graph),
     {
-        let loop_id = self.allocate_node_id();
-        let mut loop_node = LoopNode::with_max_iterations(loop_id, name, max_iterations);
+        let mut loop_node = LoopNode::with_max_iterations(name, max_iterations);
+        let loop_id = loop_node.id.clone();
 
         // Connect to previous node if exists
-        if let Some(prev_id) = self.last_node {
-            self.add_sequential_edge(prev_id, loop_id);
+        if let Some(prev_id) = self.last_node.clone() {
+            self.add_sequential_edge(prev_id, loop_id.clone());
         }
 
         // Set as entry if first node
         if self.entry.is_none() {
-            self.entry = Some(loop_id);
+            self.entry = Some(loop_id.clone());
         }
 
-        // Build loop body (shares allocator for unique IDs)
-        let mut body_graph = self.create_subgraph();
+        // Build loop body
+        let mut body_graph = Graph::new();
         body(&mut body_graph);
 
         if let Some(entry) = body_graph.entry {
@@ -581,15 +500,14 @@ impl Graph {
     where
         F: FnOnce(&mut Graph),
     {
-        // Build handler subgraph (shares allocator for unique IDs)
-        let mut handler_graph = self.create_subgraph();
+        // Build handler subgraph
+        let mut handler_graph = Graph::new();
         handler(&mut handler_graph);
 
         // Get handler entry point
         if let Some(handler_entry) = handler_graph.entry {
             // Add error edge from source to handler
-            let edge_id = self.allocate_edge_id();
-            let error_edge = Edge::Error(ErrorEdge::new(edge_id, source_node, handler_entry));
+            let error_edge = Edge::Error(ErrorEdge::new(source_node, handler_entry));
             self.edges.push(error_edge);
 
             // Merge handler graph into main graph
@@ -626,15 +544,14 @@ impl Graph {
     where
         F: FnOnce(&mut Graph),
     {
-        // Build handler subgraph (shares allocator for unique IDs)
-        let mut handler_graph = self.create_subgraph();
+        // Build handler subgraph
+        let mut handler_graph = Graph::new();
         handler(&mut handler_graph);
 
         // Get handler entry point
         if let Some(handler_entry) = handler_graph.entry {
             // Add timeout edge from source to handler
-            let edge_id = self.allocate_edge_id();
-            let timeout_edge = Edge::Timeout(TimeoutEdge::new(edge_id, source_node, handler_entry));
+            let timeout_edge = Edge::Timeout(TimeoutEdge::new(source_node, handler_entry));
             self.edges.push(timeout_edge);
 
             // Merge handler graph into main graph
@@ -686,6 +603,8 @@ impl Graph {
     ///
     /// - `T`: The output type from the previous system
     /// - `D`: The discriminator closure type
+    /// - `C`: The case builder type (iterable of key-handler pairs)
+    /// - `F`: The default case builder type (optional)
     ///
     /// # Arguments
     ///
@@ -709,32 +628,32 @@ impl Graph {
     ///     Some(|g| { g.add_system(handle_unknown); }),
     /// );
     /// ```
-    pub fn add_switch<T, D, F>(
+    pub fn add_switch<T, D, C, F>(
         &mut self,
         name: &'static str,
         discriminator: D,
-        cases: Vec<(&'static str, F)>,
+        cases: C,
         default: Option<F>,
     ) -> &mut Self
     where
         T: Output,
         D: Fn(&T) -> &'static str + Send + Sync + 'static,
+        C: IntoIterator<Item = (&'static str, F)>,
         F: FnOnce(&mut Graph),
     {
         use crate::predicate::Discriminator;
-
-        let switch_id = self.allocate_node_id();
 
         // Create the discriminator
         let boxed_discriminator: crate::predicate::BoxedDiscriminator =
             Box::new(Discriminator::<T, D>::new(discriminator));
 
         // Create switch node
-        let mut switch_node = SwitchNode::with_discriminator(switch_id, name, boxed_discriminator);
+        let mut switch_node = SwitchNode::with_discriminator(name, boxed_discriminator);
+        let switch_id = switch_node.id.clone();
 
-        // Build each case subgraph (all share the same allocator for unique IDs)
+        // Build each case subgraph
         for (key, handler) in cases {
-            let mut case_graph = self.create_subgraph();
+            let mut case_graph = Graph::new();
             handler(&mut case_graph);
 
             if let Some(case_entry) = case_graph.entry {
@@ -748,7 +667,7 @@ impl Graph {
 
         // Build default case if provided
         if let Some(default_handler) = default {
-            let mut default_graph = self.create_subgraph();
+            let mut default_graph = Graph::new();
             default_handler(&mut default_graph);
 
             if let Some(default_entry) = default_graph.entry {
@@ -761,13 +680,13 @@ impl Graph {
         }
 
         // Link previous node to switch
-        if let Some(last) = self.last_node {
-            self.add_sequential_edge(last, switch_id);
+        if let Some(last) = self.last_node.clone() {
+            self.add_sequential_edge(last, switch_id.clone());
         }
 
         // Set entry point if this is the first node
         if self.entry.is_none() {
-            self.entry = Some(switch_id);
+            self.entry = Some(switch_id.clone());
         }
 
         // Add switch node and update last_node
@@ -781,20 +700,9 @@ impl Graph {
     // Internal helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Allocates a new unique node ID.
-    fn allocate_node_id(&self) -> NodeId {
-        self.allocator.allocate_node_id()
-    }
-
-    /// Allocates a new unique edge ID.
-    fn allocate_edge_id(&self) -> EdgeId {
-        self.allocator.allocate_edge_id()
-    }
-
     /// Adds a sequential edge between two nodes.
     fn add_sequential_edge(&mut self, from: NodeId, to: NodeId) {
-        let id = self.allocate_edge_id();
-        let edge = Edge::Sequential(SequentialEdge::new(id, from, to));
+        let edge = Edge::Sequential(SequentialEdge::new(from, to));
         self.edges.push(edge);
     }
 
@@ -837,14 +745,13 @@ impl Graph {
         }
 
         // Build a set of valid node IDs for quick lookup
-        let valid_nodes: std::collections::HashSet<NodeId> =
-            self.nodes.iter().map(Node::id).collect();
+        let valid_nodes: HashSet<NodeId> = self.nodes.iter().map(Node::id).collect();
 
         // Validate entry point exists
-        if let Some(entry) = self.entry
-            && !valid_nodes.contains(&entry)
+        if let Some(entry) = &self.entry
+            && !valid_nodes.contains(entry)
         {
-            errors.push(ValidationError::InvalidEntryPoint(entry));
+            errors.push(ValidationError::InvalidEntryPoint(entry.clone()));
         }
 
         // Validate edges reference valid nodes
@@ -895,7 +802,7 @@ impl Graph {
     fn validate_edge(
         &self,
         edge: &Edge,
-        valid_nodes: &std::collections::HashSet<NodeId>,
+        valid_nodes: &HashSet<NodeId>,
         errors: &mut Vec<ValidationError>,
     ) {
         match edge {
@@ -904,14 +811,14 @@ impl Graph {
             Edge::Sequential(seq) => {
                 if !valid_nodes.contains(&seq.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: seq.id,
-                        node: seq.from,
+                        edge: seq.id.clone(),
+                        node: seq.from.clone(),
                     });
                 }
                 if !valid_nodes.contains(&seq.to) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: seq.id,
-                        node: seq.to,
+                        edge: seq.id.clone(),
+                        node: seq.to.clone(),
                     });
                 }
             }
@@ -920,20 +827,20 @@ impl Graph {
             Edge::Conditional(cond) => {
                 if !valid_nodes.contains(&cond.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: cond.id,
-                        node: cond.from,
+                        edge: cond.id.clone(),
+                        node: cond.from.clone(),
                     });
                 }
                 if !valid_nodes.contains(&cond.true_target) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: cond.id,
-                        node: cond.true_target,
+                        edge: cond.id.clone(),
+                        node: cond.true_target.clone(),
                     });
                 }
                 if !valid_nodes.contains(&cond.false_target) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: cond.id,
-                        node: cond.false_target,
+                        edge: cond.id.clone(),
+                        node: cond.false_target.clone(),
                     });
                 }
             }
@@ -942,15 +849,15 @@ impl Graph {
             Edge::Parallel(par) => {
                 if !valid_nodes.contains(&par.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: par.id,
-                        node: par.from,
+                        edge: par.id.clone(),
+                        node: par.from.clone(),
                     });
                 }
                 for target in &par.targets {
                     if !valid_nodes.contains(target) {
                         errors.push(ValidationError::InvalidEdgeTarget {
-                            edge: par.id,
-                            node: *target,
+                            edge: par.id.clone(),
+                            node: target.clone(),
                         });
                     }
                 }
@@ -960,14 +867,14 @@ impl Graph {
             Edge::LoopBack(lb) => {
                 if !valid_nodes.contains(&lb.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: lb.id,
-                        node: lb.from,
+                        edge: lb.id.clone(),
+                        node: lb.from.clone(),
                     });
                 }
                 if !valid_nodes.contains(&lb.to) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: lb.id,
-                        node: lb.to,
+                        edge: lb.id.clone(),
+                        node: lb.to.clone(),
                     });
                 }
             }
@@ -976,14 +883,14 @@ impl Graph {
             Edge::Error(err) => {
                 if !valid_nodes.contains(&err.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: err.id,
-                        node: err.from,
+                        edge: err.id.clone(),
+                        node: err.from.clone(),
                     });
                 }
                 if !valid_nodes.contains(&err.to) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: err.id,
-                        node: err.to,
+                        edge: err.id.clone(),
+                        node: err.to.clone(),
                     });
                 }
             }
@@ -992,14 +899,14 @@ impl Graph {
             Edge::Timeout(timeout) => {
                 if !valid_nodes.contains(&timeout.from) {
                     errors.push(ValidationError::InvalidEdgeSource {
-                        edge: timeout.id,
-                        node: timeout.from,
+                        edge: timeout.id.clone(),
+                        node: timeout.from.clone(),
                     });
                 }
                 if !valid_nodes.contains(&timeout.to) {
                     errors.push(ValidationError::InvalidEdgeTarget {
-                        edge: timeout.id,
-                        node: timeout.to,
+                        edge: timeout.id.clone(),
+                        node: timeout.to.clone(),
                     });
                 }
             }
@@ -1041,7 +948,7 @@ impl Graph {
     fn validate_node(
         &self,
         node: &Node,
-        valid_nodes: &std::collections::HashSet<NodeId>,
+        valid_nodes: &HashSet<NodeId>,
         errors: &mut Vec<ValidationError>,
     ) {
         match node {
@@ -1052,38 +959,38 @@ impl Graph {
             Node::Decision(dec) => {
                 if dec.predicate.is_none() {
                     errors.push(ValidationError::MissingPredicate {
-                        node: dec.id,
+                        node: dec.id.clone(),
                         name: dec.name,
                     });
                 }
                 if dec.true_branch.is_none() {
                     errors.push(ValidationError::MissingBranch {
-                        node: dec.id,
+                        node: dec.id.clone(),
                         name: dec.name,
                         branch: "true",
                     });
-                } else if let Some(target) = dec.true_branch
-                    && !valid_nodes.contains(&target)
+                } else if let Some(target) = &dec.true_branch
+                    && !valid_nodes.contains(target)
                 {
                     errors.push(ValidationError::InvalidBranchTarget {
-                        node: dec.id,
+                        node: dec.id.clone(),
                         branch: "true",
-                        target,
+                        target: target.clone(),
                     });
                 }
                 if dec.false_branch.is_none() {
                     errors.push(ValidationError::MissingBranch {
-                        node: dec.id,
+                        node: dec.id.clone(),
                         name: dec.name,
                         branch: "false",
                     });
-                } else if let Some(target) = dec.false_branch
-                    && !valid_nodes.contains(&target)
+                } else if let Some(target) = &dec.false_branch
+                    && !valid_nodes.contains(target)
                 {
                     errors.push(ValidationError::InvalidBranchTarget {
-                        node: dec.id,
+                        node: dec.id.clone(),
                         branch: "false",
-                        target,
+                        target: target.clone(),
                     });
                 }
             }
@@ -1092,31 +999,31 @@ impl Graph {
             Node::Switch(sw) => {
                 if sw.discriminator.is_none() {
                     errors.push(ValidationError::MissingDiscriminator {
-                        node: sw.id,
+                        node: sw.id.clone(),
                         name: sw.name,
                     });
                 }
                 if sw.cases.is_empty() && sw.default.is_none() {
                     errors.push(ValidationError::EmptySwitch {
-                        node: sw.id,
+                        node: sw.id.clone(),
                         name: sw.name,
                     });
                 }
                 for (case_name, target) in &sw.cases {
                     if !valid_nodes.contains(target) {
                         errors.push(ValidationError::InvalidCaseTarget {
-                            node: sw.id,
+                            node: sw.id.clone(),
                             case: case_name,
-                            target: *target,
+                            target: target.clone(),
                         });
                     }
                 }
-                if let Some(default) = sw.default
-                    && !valid_nodes.contains(&default)
+                if let Some(default) = &sw.default
+                    && !valid_nodes.contains(default)
                 {
                     errors.push(ValidationError::InvalidDefaultTarget {
-                        node: sw.id,
-                        target: default,
+                        node: sw.id.clone(),
+                        target: default.clone(),
                     });
                 }
             }
@@ -1125,30 +1032,30 @@ impl Graph {
             Node::Parallel(par) => {
                 if par.branches.is_empty() {
                     errors.push(ValidationError::EmptyParallel {
-                        node: par.id,
+                        node: par.id.clone(),
                         name: par.name,
                     });
                 }
                 for branch in &par.branches {
                     if !valid_nodes.contains(branch) {
                         errors.push(ValidationError::InvalidBranchTarget {
-                            node: par.id,
+                            node: par.id.clone(),
                             branch: "parallel",
-                            target: *branch,
+                            target: branch.clone(),
                         });
                     }
                 }
                 if par.join.is_none() {
                     errors.push(ValidationError::MissingJoin {
-                        node: par.id,
+                        node: par.id.clone(),
                         name: par.name,
                     });
-                } else if let Some(join) = par.join
-                    && !valid_nodes.contains(&join)
+                } else if let Some(join) = &par.join
+                    && !valid_nodes.contains(join)
                 {
                     errors.push(ValidationError::InvalidJoinTarget {
-                        node: par.id,
-                        target: join,
+                        node: par.id.clone(),
+                        target: join.clone(),
                     });
                 }
             }
@@ -1158,21 +1065,21 @@ impl Graph {
                 // Must have either termination predicate or max_iterations to prevent infinite loops
                 if lp.termination.is_none() && lp.max_iterations.is_none() {
                     errors.push(ValidationError::NoTerminationCondition {
-                        node: lp.id,
+                        node: lp.id.clone(),
                         name: lp.name,
                     });
                 }
                 if lp.body_entry.is_none() {
                     errors.push(ValidationError::EmptyLoopBody {
-                        node: lp.id,
+                        node: lp.id.clone(),
                         name: lp.name,
                     });
-                } else if let Some(body) = lp.body_entry
-                    && !valid_nodes.contains(&body)
+                } else if let Some(body) = &lp.body_entry
+                    && !valid_nodes.contains(body)
                 {
                     errors.push(ValidationError::InvalidLoopBody {
-                        node: lp.id,
-                        target: body,
+                        node: lp.id.clone(),
+                        target: body.clone(),
                     });
                 }
                 // Note: exit is optional - the executor will use sequential edge if not set
@@ -1182,15 +1089,15 @@ impl Graph {
             Node::Join(join) => {
                 if join.sources.is_empty() {
                     errors.push(ValidationError::EmptyJoinSources {
-                        node: join.id,
+                        node: join.id.clone(),
                         name: join.name,
                     });
                 }
                 for source in &join.sources {
                     if !valid_nodes.contains(source) {
                         errors.push(ValidationError::InvalidJoinSource {
-                            node: join.id,
-                            source: *source,
+                            node: join.id.clone(),
+                            source: source.clone(),
                         });
                     }
                 }

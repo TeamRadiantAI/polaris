@@ -48,7 +48,7 @@
 
 mod schedule;
 
-pub use schedule::ScheduleId;
+pub use schedule::{IntoScheduleIds, Schedule, ScheduleId};
 
 use core::any::TypeId;
 

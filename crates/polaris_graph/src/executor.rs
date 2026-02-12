@@ -15,7 +15,7 @@
 //!
 //! let ctx = SystemContext::new();
 //! let executor = GraphExecutor::new();
-//! let result = executor.execute(&graph, &ctx).await?;
+//! let result = executor.execute(&graph, &ctx, None).await?;
 //! ```
 
 use core::any::TypeId;
@@ -23,11 +23,24 @@ use core::fmt;
 use core::time::Duration;
 
 use polaris_system::param::{AccessMode, SystemAccess, SystemContext};
+use polaris_system::plugin::{Schedule, ScheduleId};
+
+use hashbrown::HashSet;
 
 use crate::edge::Edge;
 use crate::graph::Graph;
+use crate::hooks::HooksAPI;
+use crate::hooks::events::GraphEvent;
+use crate::hooks::schedule::{
+    OnDecisionComplete, OnDecisionStart, OnGraphComplete, OnGraphFailure, OnGraphStart, OnLoopEnd,
+    OnLoopIteration, OnLoopStart, OnParallelComplete, OnParallelStart, OnSwitchComplete,
+    OnSwitchStart, OnSystemComplete, OnSystemError, OnSystemStart,
+};
 use crate::node::{LoopNode, Node, NodeId, ParallelNode, SwitchNode};
 use crate::predicate::PredicateError;
+
+/// Default case name for switch nodes when no match is found.
+pub const DEFAULT_SWITCH_CASE: &str = "default";
 
 /// Result of executing a graph.
 #[derive(Debug)]
@@ -39,7 +52,7 @@ pub struct ExecutionResult {
 }
 
 /// Errors that can occur during graph execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExecutionError {
     /// The graph has no entry point.
     EmptyGraph,
@@ -170,9 +183,6 @@ pub enum ResourceValidationError {
         access_mode: AccessMode,
     },
     /// A required output from a previous system is missing.
-    ///
-    /// Note: This can only be validated with flow analysis, as outputs
-    /// are produced dynamically during execution.
     MissingOutput {
         /// The node ID of the system requiring the output.
         node: NodeId,
@@ -290,18 +300,20 @@ impl GraphExecutor {
     ///
     /// - **Resources** (`Res<T>`, `ResMut<T>`): Checked against the context's
     ///   resources (local scope, parent chain, and globals).
+    /// - **Hook-provided resources**: Resources provided by hooks on `OnGraphStart`
+    ///   and `OnSystemStart` are considered available.
     /// - **Outputs** (`Out<T>`): Currently not validated, as outputs are
-    ///   produced dynamically during execution. Use flow analysis for
-    ///   output validation.
+    ///   produced dynamically during execution.
     ///
     /// # Example
     ///
     /// ```ignore
     /// let executor = GraphExecutor::new();
     /// let mut ctx = server.create_context();
+    /// let hooks = server.api::<HooksAPI>();
     ///
     /// // Validate before executing
-    /// if let Err(errors) = executor.validate_resources(&graph, &ctx) {
+    /// if let Err(errors) = executor.validate_resources(&graph, &ctx, hooks) {
     ///     for error in &errors {
     ///         eprintln!("Validation error: {error}");
     ///     }
@@ -309,7 +321,7 @@ impl GraphExecutor {
     /// }
     ///
     /// // Safe to execute - all resources are available
-    /// let result = executor.execute(&graph, &mut ctx).await?;
+    /// let result = executor.execute(&graph, &mut ctx, hooks).await?;
     /// ```
     ///
     /// # Returns
@@ -320,13 +332,30 @@ impl GraphExecutor {
         &self,
         graph: &Graph,
         ctx: &SystemContext<'_>,
+        hooks: Option<&HooksAPI>,
     ) -> Result<(), Vec<ResourceValidationError>> {
         let mut errors = Vec::new();
+
+        let hook_provided: HashSet<TypeId> = hooks
+            .map(|h| {
+                let mut resources = HashSet::new();
+                resources.extend(h.provided_resources_for(ScheduleId::of::<OnGraphStart>()));
+                resources.extend(h.provided_resources_for(ScheduleId::of::<OnSystemStart>()));
+                resources
+            })
+            .unwrap_or_default();
 
         for node in graph.nodes() {
             if let Node::System(sys) = node {
                 let access = sys.system.access();
-                self.validate_system_access(sys.id, sys.system.name(), &access, ctx, &mut errors);
+                self.validate_system_access(
+                    &sys.id,
+                    sys.system.name(),
+                    &access,
+                    ctx,
+                    &hook_provided,
+                    &mut errors,
+                );
             }
         }
 
@@ -340,24 +369,26 @@ impl GraphExecutor {
     /// Validates a single system's access requirements against the context.
     fn validate_system_access(
         &self,
-        node_id: NodeId,
+        node_id: &NodeId,
         system_name: &'static str,
         access: &SystemAccess,
         ctx: &SystemContext<'_>,
+        hook_provided: &HashSet<TypeId>,
         errors: &mut Vec<ResourceValidationError>,
     ) {
-        // Validate resource accesses
         for res_access in &access.resources {
+            if hook_provided.contains(&res_access.type_id) {
+                continue;
+            }
+
             let exists = match res_access.mode {
-                // Read access walks up the hierarchy (local + parent + globals)
                 AccessMode::Read => ctx.contains_resource_by_type_id(res_access.type_id),
-                // Write access only checks local scope
                 AccessMode::Write => ctx.contains_local_resource_by_type_id(res_access.type_id),
             };
 
             if !exists {
                 errors.push(ResourceValidationError::MissingResource {
-                    node: node_id,
+                    node: node_id.clone(),
                     system_name,
                     resource_type: res_access.type_name,
                     type_id: res_access.type_id,
@@ -365,14 +396,6 @@ impl GraphExecutor {
                 });
             }
         }
-
-        // Note: Output validation is skipped here because outputs are produced
-        // dynamically during execution. To validate outputs, we would need
-        // flow analysis to determine which outputs are produced before each
-        // system that requires them.
-        //
-        // For now, outputs will fail at runtime with ParamError::OutputNotFound
-        // if the required output hasn't been produced yet.
     }
 
     /// Executes a graph starting from its entry point.
@@ -380,6 +403,18 @@ impl GraphExecutor {
     /// System outputs are stored in the context after each system executes,
     /// making them available to subsequent systems via `Out<T>` parameters
     /// and predicates.
+    ///
+    /// # Hooks
+    ///
+    /// If `hooks` is provided, lifecycle hooks are invoked at key execution points:
+    /// - `OnGraphStart` / `OnGraphComplete` / `OnGraphFailure` - Graph-level events
+    /// - `OnSystemStart` / `OnSystemComplete` / `OnSystemError` - System events
+    /// - `OnDecisionStart` / `OnDecisionComplete` - Decision node events
+    /// - `OnSwitchStart` / `OnSwitchComplete` - Switch node events
+    /// - `OnLoopStart` / `OnLoopEnd` - Loop iteration events
+    /// - `OnParallelStart` / `OnParallelComplete` - Parallel execution events
+    ///
+    /// For more, see the [`hooks` module](crate::hooks).
     ///
     /// # Errors
     ///
@@ -393,164 +428,86 @@ impl GraphExecutor {
         &self,
         graph: &Graph,
         ctx: &mut SystemContext<'_>,
+        hooks: Option<&HooksAPI>,
     ) -> Result<ExecutionResult, ExecutionError> {
         let start = std::time::Instant::now();
-        let mut nodes_executed = 0;
+        let entry = graph.entry().ok_or(ExecutionError::EmptyGraph)?;
 
-        let mut current = graph.entry().ok_or(ExecutionError::EmptyGraph)?;
+        // Invoke OnGraphStart hook
+        Self::invoke_hook::<OnGraphStart>(
+            hooks,
+            ctx,
+            &GraphEvent::GraphStart {
+                node_count: graph.node_count(),
+            },
+        );
 
-        loop {
-            let node = graph
-                .get_node(current)
-                .ok_or(ExecutionError::NodeNotFound(current))?;
+        // Execute the graph
+        let result = self.execute_from(graph, ctx, entry, 0, hooks).await;
 
-            nodes_executed += 1;
-
-            match node {
-                Node::System(sys) => {
-                    // Execute the system with optional timeout
-                    let result = if let Some(timeout_duration) = sys.timeout {
-                        match tokio::time::timeout(timeout_duration, sys.system.run_erased(ctx))
-                            .await
-                        {
-                            Ok(inner_result) => inner_result,
-                            Err(_elapsed) => {
-                                // Timeout occurred - check for timeout edge
-                                if let Some(handler) = self.find_timeout_edge(graph, current) {
-                                    current = handler;
-                                    continue;
-                                }
-                                return Err(ExecutionError::Timeout {
-                                    node: current,
-                                    timeout: timeout_duration,
-                                });
-                            }
-                        }
-                    } else {
-                        sys.system.run_erased(ctx).await
-                    };
-
-                    match result {
-                        Ok(output) => {
-                            // Store output in context for subsequent systems/predicates
-                            ctx.insert_output_boxed(sys.output_type_id(), output);
-
-                            // Find next sequential node
-                            match self.find_next_sequential(graph, current) {
-                                Ok(next) => current = next,
-                                Err(ExecutionError::NoNextNode(_)) => break, // Terminal node
-                                Err(err) => return Err(err),
-                            }
-                        }
-                        Err(err) => {
-                            // Check for error edge (fallback path)
-                            if let Some(handler) = self.find_error_edge(graph, current) {
-                                current = handler;
-                                // Continue execution from error handler
-                            } else {
-                                // No error handler, propagate error
-                                return Err(ExecutionError::SystemError(err.to_string()));
-                            }
-                        }
-                    }
-                }
-                Node::Decision(dec) => {
-                    let decision_id = current;
-                    let predicate = dec
-                        .predicate
-                        .as_ref()
-                        .ok_or(ExecutionError::MissingPredicate(current))?;
-
-                    let result = predicate
-                        .evaluate(ctx)
-                        .map_err(ExecutionError::PredicateError)?;
-
-                    let branch_entry = if result {
-                        dec.true_branch.ok_or(ExecutionError::MissingBranch {
-                            node: current,
-                            branch: "true",
-                        })?
-                    } else {
-                        dec.false_branch.ok_or(ExecutionError::MissingBranch {
-                            node: current,
-                            branch: "false",
-                        })?
-                    };
-
-                    // Execute branch as subgraph
-                    let branch_count = self.execute_subgraph(graph, ctx, branch_entry, 0).await?;
-                    nodes_executed += branch_count;
-
-                    // After branch, find next sequential from decision node
-                    match self.find_next_sequential(graph, decision_id) {
-                        Ok(next) => current = next,
-                        Err(ExecutionError::NoNextNode(_)) => break,
-                        Err(err) => return Err(err),
-                    }
-                }
-                Node::Loop(loop_node) => {
-                    let loop_count = self.execute_loop(graph, ctx, loop_node, 0).await?;
-                    nodes_executed += loop_count;
-
-                    match self.find_next_sequential(graph, current) {
-                        Ok(next) => current = next,
-                        Err(ExecutionError::NoNextNode(_)) => break,
-                        Err(err) => return Err(err),
-                    }
-                }
-                Node::Parallel(par) => {
-                    let parallel_count = self.execute_parallel(graph, ctx, par, 0).await?;
-                    nodes_executed += parallel_count;
-
-                    current = par.join.ok_or(ExecutionError::MissingJoin(current))?;
-                }
-                Node::Join(_) => {
-                    // Join is a sync point, find next sequential
-                    match self.find_next_sequential(graph, current) {
-                        Ok(next) => current = next,
-                        Err(ExecutionError::NoNextNode(_)) => break,
-                        Err(err) => return Err(err),
-                    }
-                }
-                Node::Switch(switch_node) => {
-                    let (switch_count, next) =
-                        self.execute_switch(graph, ctx, switch_node, 0).await?;
-                    nodes_executed += switch_count;
-                    match next {
-                        Some(n) => current = n,
-                        None => break, // Switch was terminal node
-                    }
-                }
+        // Invoke OnGraphComplete hook
+        let duration = start.elapsed();
+        match result {
+            Ok(nodes_executed) => {
+                Self::invoke_hook::<OnGraphComplete>(
+                    hooks,
+                    ctx,
+                    &GraphEvent::GraphComplete {
+                        nodes_executed,
+                        duration,
+                    },
+                );
+                Ok(ExecutionResult {
+                    nodes_executed,
+                    duration,
+                })
+            }
+            Err(err) => {
+                Self::invoke_hook::<OnGraphFailure>(
+                    hooks,
+                    ctx,
+                    &GraphEvent::GraphFailure { error: err.clone() },
+                );
+                Err(err)
             }
         }
+    }
 
-        Ok(ExecutionResult {
-            nodes_executed,
-            duration: start.elapsed(),
-        })
+    /// Helper to invoke a hook if the [`HooksAPI`] is present.
+    ///
+    /// Hooks receive mutable access to the context, enabling both observability
+    /// and resource injection.
+    fn invoke_hook<S: Schedule>(
+        hooks: Option<&HooksAPI>,
+        ctx: &mut SystemContext<'_>,
+        event: &GraphEvent,
+    ) {
+        if let Some(api) = hooks {
+            api.invoke(ScheduleId::of::<S>(), ctx, event);
+        }
     }
 
     /// Finds the next node connected by a sequential edge.
-    fn find_next_sequential(&self, graph: &Graph, from: NodeId) -> Result<NodeId, ExecutionError> {
+    fn find_next_sequential(&self, graph: &Graph, from: &NodeId) -> Result<NodeId, ExecutionError> {
         for edge in graph.edges() {
             if let Edge::Sequential(seq) = edge
-                && seq.from == from
+                && seq.from == *from
             {
-                return Ok(seq.to);
+                return Ok(seq.to.clone());
             }
         }
-        Err(ExecutionError::NoNextNode(from))
+        Err(ExecutionError::NoNextNode(from.clone()))
     }
 
     /// Finds an error handler edge from the given node.
     ///
     /// Returns the target node ID if an error edge exists from `from`.
-    fn find_error_edge(&self, graph: &Graph, from: NodeId) -> Option<NodeId> {
+    fn find_error_edge(&self, graph: &Graph, from: &NodeId) -> Option<NodeId> {
         for edge in graph.edges() {
             if let Edge::Error(err_edge) = edge
-                && err_edge.from == from
+                && err_edge.from == *from
             {
-                return Some(err_edge.to);
+                return Some(err_edge.to.clone());
             }
         }
         None
@@ -559,12 +516,12 @@ impl GraphExecutor {
     /// Finds a timeout handler edge from the given node.
     ///
     /// Returns the target node ID if a timeout edge exists from `from`.
-    fn find_timeout_edge(&self, graph: &Graph, from: NodeId) -> Option<NodeId> {
+    fn find_timeout_edge(&self, graph: &Graph, from: &NodeId) -> Option<NodeId> {
         for edge in graph.edges() {
             if let Edge::Timeout(timeout_edge) = edge
-                && timeout_edge.from == from
+                && timeout_edge.from == *from
             {
-                return Some(timeout_edge.to);
+                return Some(timeout_edge.to.clone());
             }
         }
         None
@@ -579,15 +536,29 @@ impl GraphExecutor {
         ctx: &'a mut SystemContext<'_>,
         loop_node: &'a LoopNode,
         depth: usize,
+        hooks: Option<&'a HooksAPI>,
     ) -> futures::future::BoxFuture<'a, Result<usize, ExecutionError>> {
         Box::pin(async move {
             let max_iterations = loop_node
                 .max_iterations
                 .or(self.default_max_iterations)
-                .ok_or(ExecutionError::NoTerminationCondition(loop_node.id))?;
+                .ok_or_else(|| ExecutionError::NoTerminationCondition(loop_node.id.clone()))?;
 
             let mut iterations = 0;
             let mut nodes_executed = 0;
+
+            // Invoke OnLoopStart hook
+            Self::invoke_hook::<OnLoopStart>(
+                hooks,
+                ctx,
+                &GraphEvent::LoopStart {
+                    node_id: loop_node.id.clone(),
+                    loop_name: loop_node.name,
+                    max_iterations: Some(max_iterations),
+                },
+            );
+
+            let loop_start = std::time::Instant::now();
 
             loop {
                 // Check termination predicate first
@@ -597,27 +568,49 @@ impl GraphExecutor {
                     break;
                 }
 
-                // Check max iterations
                 if iterations >= max_iterations {
-                    // If we have a termination predicate, this is an error
-                    // If not, it's expected behavior
                     if loop_node.termination.is_some() {
                         return Err(ExecutionError::MaxIterationsExceeded {
-                            node: loop_node.id,
+                            node: loop_node.id.clone(),
                             max: max_iterations,
                         });
                     }
                     break;
                 }
 
-                // Execute loop body if present
-                if let Some(body) = loop_node.body_entry {
-                    let count = self.execute_subgraph(graph, ctx, body, depth).await?;
+                // Invoke OnLoopIteration hook
+                Self::invoke_hook::<OnLoopIteration>(
+                    hooks,
+                    ctx,
+                    &GraphEvent::LoopIteration {
+                        node_id: loop_node.id.clone(),
+                        loop_name: loop_node.name,
+                        iteration: iterations,
+                    },
+                );
+
+                if let Some(body) = &loop_node.body_entry {
+                    let count = self
+                        .execute_from(graph, ctx, body.clone(), depth, hooks)
+                        .await?;
                     nodes_executed += count;
                 }
 
                 iterations += 1;
             }
+
+            // Invoke OnLoopEnd hook
+            Self::invoke_hook::<OnLoopEnd>(
+                hooks,
+                ctx,
+                &GraphEvent::LoopEnd {
+                    node_id: loop_node.id.clone(),
+                    loop_name: loop_node.name,
+                    iterations,
+                    nodes_executed,
+                    duration: loop_start.elapsed(),
+                },
+            );
 
             Ok(nodes_executed)
         })
@@ -626,106 +619,161 @@ impl GraphExecutor {
     /// Executes parallel branches concurrently, returning the total nodes executed.
     ///
     /// Each branch runs in its own child context, providing isolation between
-    /// parallel execution paths. Outputs from all branches are merged back into
-    /// the parent context after completion (last-write-wins for same types).
-    ///
-    /// # Concurrency
-    ///
-    /// Branches execute concurrently using `futures::future::try_join_all`.
-    /// If any branch fails, the entire parallel execution fails and remaining
-    /// branches are cancelled.
-    ///
-    /// Returns a boxed future to support recursion with nested control flow.
+    /// parallel execution paths.
     fn execute_parallel<'a>(
         &'a self,
         graph: &'a Graph,
         ctx: &'a mut SystemContext<'_>,
         par: &'a ParallelNode,
         depth: usize,
+        hooks: Option<&'a HooksAPI>,
     ) -> futures::future::BoxFuture<'a, Result<usize, ExecutionError>> {
         Box::pin(async move {
             use futures::future::try_join_all;
 
-            // Create child contexts for each branch upfront
+            let branch_count = par.branches.len();
+
+            // Invoke OnParallelStart hook
+            Self::invoke_hook::<OnParallelStart>(
+                hooks,
+                ctx,
+                &GraphEvent::ParallelStart {
+                    node_id: par.id.clone(),
+                    node_name: par.name,
+                    branch_count,
+                },
+            );
+
+            let start = std::time::Instant::now();
+
             let mut child_contexts: Vec<SystemContext<'_>> =
                 par.branches.iter().map(|_| ctx.child()).collect();
 
-            // Pair branches with their contexts and create futures
-            let futures = par
-                .branches
-                .iter()
-                .zip(child_contexts.iter_mut())
-                .map(|(&branch, child_ctx)| self.execute_subgraph(graph, child_ctx, branch, depth));
+            let futures =
+                par.branches
+                    .iter()
+                    .zip(child_contexts.iter_mut())
+                    .map(|(branch, child_ctx)| {
+                        self.execute_from(graph, child_ctx, branch.clone(), depth, hooks)
+                    });
 
-            // Execute all branches concurrently
             let results = try_join_all(futures).await?;
-
-            // Sum up total nodes executed across all branches
             let total_nodes = results.iter().sum();
+
+            // Invoke OnParallelComplete hook
+            Self::invoke_hook::<OnParallelComplete>(
+                hooks,
+                ctx,
+                &GraphEvent::ParallelComplete {
+                    node_id: par.id.clone(),
+                    node_name: par.name,
+                    branch_count,
+                    total_nodes_executed: total_nodes,
+                    duration: start.elapsed(),
+                },
+            );
 
             Ok(total_nodes)
         })
     }
 
-    /// Executes a switch node, returning the nodes executed and optionally the next node.
+    /// Executes a switch node, returning the nodes executed and optional next node.
     ///
-    /// Evaluates the discriminator to determine which case branch to execute,
-    /// then runs that branch's subgraph. Returns the total nodes executed in
-    /// the branch and the next node to continue execution from (if any).
+    /// Returns a tuple of `(nodes_executed, next_node)` where `next_node` is the
+    /// sequential continuation after the switch, if any.
     fn execute_switch<'a>(
         &'a self,
         graph: &'a Graph,
         ctx: &'a mut SystemContext<'_>,
         switch_node: &'a SwitchNode,
         depth: usize,
+        hooks: Option<&'a HooksAPI>,
     ) -> futures::future::BoxFuture<'a, Result<(usize, Option<NodeId>), ExecutionError>> {
         Box::pin(async move {
-            // Get the discriminator
+            // Invoke OnSwitchStart hook
+            Self::invoke_hook::<OnSwitchStart>(
+                hooks,
+                ctx,
+                &GraphEvent::SwitchStart {
+                    node_id: switch_node.id.clone(),
+                    node_name: switch_node.name,
+                    case_count: switch_node.cases.len(),
+                    has_default: switch_node.default.is_some(),
+                },
+            );
+
             let discriminator = switch_node
                 .discriminator
                 .as_ref()
-                .ok_or(ExecutionError::MissingDiscriminator(switch_node.id))?;
+                .ok_or_else(|| ExecutionError::MissingDiscriminator(switch_node.id.clone()))?;
 
-            // Evaluate to get the case key
             let key = discriminator
                 .discriminate(ctx)
                 .map_err(ExecutionError::PredicateError)?;
 
-            // Find matching case
-            let target = switch_node
+            let (target, used_default) = switch_node
                 .cases
                 .iter()
                 .find(|(case_key, _)| *case_key == key)
-                .map(|(_, node_id)| *node_id)
-                .or(switch_node.default)
-                .ok_or(ExecutionError::NoMatchingCase {
-                    node: switch_node.id,
+                .map(|(_, node_id)| (node_id.clone(), false))
+                .or_else(|| switch_node.default.as_ref().map(|d| (d.clone(), true)))
+                .ok_or_else(|| ExecutionError::NoMatchingCase {
+                    node: switch_node.id.clone(),
                     key,
                 })?;
 
-            // Execute the case branch subgraph
-            let nodes_executed = self.execute_subgraph(graph, ctx, target, depth).await?;
+            let nodes_executed = self.execute_from(graph, ctx, target, depth, hooks).await?;
 
-            // Find the next node after the switch (via sequential edge from switch node)
-            let next = self.find_next_sequential(graph, switch_node.id).ok();
+            // Invoke OnSwitchComplete hook
+            Self::invoke_hook::<OnSwitchComplete>(
+                hooks,
+                ctx,
+                &GraphEvent::SwitchComplete {
+                    node_id: switch_node.id.clone(),
+                    node_name: switch_node.name,
+                    selected_case: if used_default {
+                        DEFAULT_SWITCH_CASE
+                    } else {
+                        key
+                    },
+                    used_default,
+                },
+            );
 
+            let next = self.find_next_sequential(graph, &switch_node.id).ok();
             Ok((nodes_executed, next))
         })
     }
 
-    /// Executes a subgraph starting from a given node until a terminal point.
+    /// Core graph execution engine starting from a given node.
     ///
-    /// Supports nested control flow (loops, parallel) with recursion depth tracking.
-    /// Returns a boxed future to support recursion with nested control flow.
-    fn execute_subgraph<'a>(
+    /// This is the unified execution function used by both `execute()` (public API)
+    /// and internal recursive calls for control flow constructs (decision branches,
+    /// loop bodies, parallel branches, switch cases).
+    ///
+    /// Traverses the graph from `start`, executing nodes and following edges until
+    /// a terminal point (no outgoing sequential edge) is reached.
+    ///
+    /// # Arguments
+    ///
+    /// * `graph` - The graph to execute
+    /// * `ctx` - The system context for resource access and output storage
+    /// * `start` - The node ID to begin execution from
+    /// * `depth` - Current recursion depth for nested control flow (safety limit)
+    /// * `hooks` - Optional hooks API for lifecycle callbacks
+    ///
+    /// # Returns
+    ///
+    /// The number of nodes executed, or an error if execution fails.
+    fn execute_from<'a>(
         &'a self,
         graph: &'a Graph,
         ctx: &'a mut SystemContext<'_>,
         start: NodeId,
         depth: usize,
+        hooks: Option<&'a HooksAPI>,
     ) -> futures::future::BoxFuture<'a, Result<usize, ExecutionError>> {
         Box::pin(async move {
-            // Check recursion limit
             if depth >= self.max_recursion_depth {
                 return Err(ExecutionError::RecursionLimitExceeded {
                     depth,
@@ -738,22 +786,32 @@ impl GraphExecutor {
 
             loop {
                 let node = graph
-                    .get_node(current)
-                    .ok_or(ExecutionError::NodeNotFound(current))?;
+                    .get_node(current.clone())
+                    .ok_or_else(|| ExecutionError::NodeNotFound(current.clone()))?;
 
                 nodes_executed += 1;
 
                 match node {
                     Node::System(sys) => {
-                        // Execute the system with optional timeout
+                        // Invoke OnSystemStart hook
+                        Self::invoke_hook::<OnSystemStart>(
+                            hooks,
+                            ctx,
+                            &GraphEvent::SystemStart {
+                                node_id: current.clone(),
+                                system_name: sys.name(),
+                            },
+                        );
+
+                        let system_start = std::time::Instant::now();
+
                         let result = if let Some(timeout_duration) = sys.timeout {
                             match tokio::time::timeout(timeout_duration, sys.system.run_erased(ctx))
                                 .await
                             {
                                 Ok(inner_result) => inner_result,
                                 Err(_elapsed) => {
-                                    // Timeout occurred - check for timeout edge
-                                    if let Some(handler) = self.find_timeout_edge(graph, current) {
+                                    if let Some(handler) = self.find_timeout_edge(graph, &current) {
                                         current = handler;
                                         continue;
                                     }
@@ -769,90 +827,141 @@ impl GraphExecutor {
 
                         match result {
                             Ok(output) => {
-                                // Store output in context
                                 ctx.insert_output_boxed(sys.output_type_id(), output);
 
-                                match self.find_next_sequential(graph, current) {
+                                // Invoke OnSystemComplete hook
+                                Self::invoke_hook::<OnSystemComplete>(
+                                    hooks,
+                                    ctx,
+                                    &GraphEvent::SystemComplete {
+                                        node_id: current.clone(),
+                                        system_name: sys.name(),
+                                        duration: system_start.elapsed(),
+                                    },
+                                );
+
+                                match self.find_next_sequential(graph, &current) {
                                     Ok(next) => current = next,
                                     Err(ExecutionError::NoNextNode(_)) => break,
                                     Err(err) => return Err(err),
                                 }
                             }
                             Err(err) => {
-                                // Check for error edge (fallback path)
-                                if let Some(handler) = self.find_error_edge(graph, current) {
+                                let error_string = err.to_string();
+
+                                // Invoke OnSystemError hook
+                                Self::invoke_hook::<OnSystemError>(
+                                    hooks,
+                                    ctx,
+                                    &GraphEvent::SystemError {
+                                        node_id: current.clone(),
+                                        system_name: sys.name(),
+                                        error: error_string.clone(),
+                                    },
+                                );
+
+                                if let Some(handler) = self.find_error_edge(graph, &current) {
                                     current = handler;
-                                    // Continue execution from error handler
                                 } else {
-                                    // No error handler, propagate error
-                                    return Err(ExecutionError::SystemError(err.to_string()));
+                                    return Err(ExecutionError::SystemError(error_string));
                                 }
                             }
                         }
                     }
                     Node::Decision(dec) => {
-                        let decision_id = current;
+                        let decision_id = current.clone();
+
+                        // Invoke OnDecisionStart hook
+                        Self::invoke_hook::<OnDecisionStart>(
+                            hooks,
+                            ctx,
+                            &GraphEvent::DecisionStart {
+                                node_id: current.clone(),
+                                node_name: dec.name,
+                            },
+                        );
+
                         let predicate = dec
                             .predicate
                             .as_ref()
-                            .ok_or(ExecutionError::MissingPredicate(current))?;
+                            .ok_or_else(|| ExecutionError::MissingPredicate(current.clone()))?;
 
                         let result = predicate
                             .evaluate(ctx)
                             .map_err(ExecutionError::PredicateError)?;
 
-                        let branch_entry = if result {
-                            dec.true_branch.ok_or(ExecutionError::MissingBranch {
-                                node: current,
-                                branch: "true",
-                            })?
+                        let (branch_entry, selected_branch) = if result {
+                            (
+                                dec.true_branch.clone().ok_or_else(|| {
+                                    ExecutionError::MissingBranch {
+                                        node: current.clone(),
+                                        branch: "true",
+                                    }
+                                })?,
+                                "true",
+                            )
                         } else {
-                            dec.false_branch.ok_or(ExecutionError::MissingBranch {
-                                node: current,
-                                branch: "false",
-                            })?
+                            (
+                                dec.false_branch.clone().ok_or_else(|| {
+                                    ExecutionError::MissingBranch {
+                                        node: current.clone(),
+                                        branch: "false",
+                                    }
+                                })?,
+                                "false",
+                            )
                         };
 
                         // Execute branch as subgraph (with increased depth)
                         let branch_count = self
-                            .execute_subgraph(graph, ctx, branch_entry, depth + 1)
+                            .execute_from(graph, ctx, branch_entry, depth + 1, hooks)
                             .await?;
                         nodes_executed += branch_count;
 
-                        // After branch, find next sequential from decision node
-                        match self.find_next_sequential(graph, decision_id) {
+                        // Invoke OnDecisionComplete hook
+                        Self::invoke_hook::<OnDecisionComplete>(
+                            hooks,
+                            ctx,
+                            &GraphEvent::DecisionComplete {
+                                node_id: decision_id.clone(),
+                                node_name: dec.name,
+                                selected_branch,
+                            },
+                        );
+
+                        match self.find_next_sequential(graph, &decision_id) {
                             Ok(next) => current = next,
                             Err(ExecutionError::NoNextNode(_)) => break,
                             Err(err) => return Err(err),
                         }
                     }
-                    Node::Join(_) => {
-                        // Join marks the end of a parallel branch
-                        break;
-                    }
+                    Node::Join(_) => match self.find_next_sequential(graph, &current) {
+                        Ok(next) => current = next,
+                        Err(ExecutionError::NoNextNode(_)) => break,
+                        Err(err) => return Err(err),
+                    },
                     Node::Loop(loop_node) => {
-                        // Execute nested loop with increased depth
-                        let loop_count =
-                            self.execute_loop(graph, ctx, loop_node, depth + 1).await?;
+                        let loop_count = self
+                            .execute_loop(graph, ctx, loop_node, depth + 1, hooks)
+                            .await?;
                         nodes_executed += loop_count;
 
-                        match self.find_next_sequential(graph, current) {
+                        match self.find_next_sequential(graph, &current) {
                             Ok(next) => current = next,
                             Err(ExecutionError::NoNextNode(_)) => break,
                             Err(err) => return Err(err),
                         }
                     }
                     Node::Parallel(par) => {
-                        // Execute nested parallel with increased depth
-                        let parallel_count =
-                            self.execute_parallel(graph, ctx, par, depth + 1).await?;
+                        let parallel_count = self
+                            .execute_parallel(graph, ctx, par, depth + 1, hooks)
+                            .await?;
                         nodes_executed += parallel_count;
 
-                        // After parallel completes, continue to join node or next sequential
-                        if let Some(join) = par.join {
-                            current = join;
+                        if let Some(join) = &par.join {
+                            current = join.clone();
                         } else {
-                            match self.find_next_sequential(graph, current) {
+                            match self.find_next_sequential(graph, &current) {
                                 Ok(next) => current = next,
                                 Err(ExecutionError::NoNextNode(_)) => break,
                                 Err(err) => return Err(err),
@@ -860,14 +969,13 @@ impl GraphExecutor {
                         }
                     }
                     Node::Switch(switch_node) => {
-                        // Execute nested switch with increased depth
                         let (switch_count, next) = self
-                            .execute_switch(graph, ctx, switch_node, depth + 1)
+                            .execute_switch(graph, ctx, switch_node, depth + 1, hooks)
                             .await?;
                         nodes_executed += switch_count;
                         match next {
                             Some(n) => current = n,
-                            None => break, // Switch was terminal node in subgraph
+                            None => break,
                         }
                     }
                 }
@@ -878,6 +986,8 @@ impl GraphExecutor {
     }
 }
 
+/// Unit tests for [`GraphExecutor`] configuration and error types.
+/// Execution tests are in `tests/integration.rs`.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -886,6 +996,7 @@ mod tests {
     fn executor_creation() {
         let executor = GraphExecutor::new();
         assert_eq!(executor.default_max_iterations, Some(1000));
+        assert_eq!(executor.max_recursion_depth, 64);
     }
 
     #[test]
@@ -901,1111 +1012,8 @@ mod tests {
     }
 
     #[test]
-    fn execution_error_display() {
-        let err = ExecutionError::EmptyGraph;
-        assert_eq!(format!("{err}"), "graph has no entry point");
-
-        let err = ExecutionError::NodeNotFound(NodeId::new(5));
-        assert_eq!(format!("{err}"), "node not found: node_5");
-
-        let err = ExecutionError::MissingBranch {
-            node: NodeId::new(3),
-            branch: "true",
-        };
-        assert_eq!(
-            format!("{err}"),
-            "missing true branch on decision node: node_3"
-        );
-    }
-
-    #[tokio::test]
-    async fn execute_empty_graph() {
-        let graph = Graph::new();
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(matches!(result, Err(ExecutionError::EmptyGraph)));
-    }
-
-    #[tokio::test]
-    async fn execute_single_system() {
-        async fn simple() -> i32 {
-            42
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(simple);
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.nodes_executed, 1);
-
-        // Verify output was stored
-        assert!(ctx.contains_output::<i32>());
-    }
-
-    #[tokio::test]
-    async fn execute_sequential_systems() {
-        async fn first() -> i32 {
-            1
-        }
-        async fn second() -> i32 {
-            2
-        }
-        async fn third() -> i32 {
-            3
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(first).add_system(second).add_system(third);
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok());
-        let result = result.unwrap();
-        assert_eq!(result.nodes_executed, 3);
-
-        // Last system's output should be available
-        assert!(ctx.contains_output::<i32>());
-    }
-
-    #[tokio::test]
-    async fn output_available_to_predicate() {
-        #[derive(Debug)]
-        struct Decision {
-            should_branch: bool,
-        }
-
-        async fn make_decision() -> Decision {
-            Decision {
-                should_branch: true,
-            }
-        }
-
-        async fn true_path() -> &'static str {
-            "took true path"
-        }
-
-        async fn false_path() -> &'static str {
-            "took false path"
-        }
-
-        let mut graph = Graph::new();
-
-        // Add decision system
-        graph.add_system(make_decision);
-
-        // Add conditional branch that reads the decision output
-        graph.add_conditional_branch::<Decision, _, _, _>(
-            "branch",
-            |decision| decision.should_branch,
-            |g| {
-                g.add_system(true_path);
-            },
-            |g| {
-                g.add_system(false_path);
-            },
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok(), "Execution failed: {:?}", result.err());
-
-        // Should have taken the true branch
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "took true path");
-    }
-
-    #[tokio::test]
-    async fn error_handler_invoked_on_failure() {
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        // Custom system that always fails
-        struct FailingSystem;
-
-        impl System for FailingSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(
-                    async move { Err(SystemError::ExecutionError("intentional failure".into())) },
-                )
-            }
-
-            fn name(&self) -> &'static str {
-                "failing_system"
-            }
-        }
-
-        async fn error_handler() -> &'static str {
-            "handled error"
-        }
-
-        let mut graph = Graph::new();
-
-        // Add the failing system using public API
-        let fail_id = graph.add_boxed_system(Box::new(FailingSystem));
-
-        graph.add_error_handler(fail_id, |g| {
-            g.add_system(error_handler);
-        });
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_ok(),
-            "Execution should succeed via error handler: {:?}",
-            result.err()
-        );
-
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "handled error");
-    }
-
-    #[tokio::test]
-    async fn error_propagates_without_handler() {
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        // Custom system that always fails
-        struct FailingSystem;
-
-        impl System for FailingSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move { Err(SystemError::ExecutionError("always fails".into())) })
-            }
-
-            fn name(&self) -> &'static str {
-                "failing_system"
-            }
-        }
-
-        let mut graph = Graph::new();
-
-        // Add the failing system using public API
-        graph.add_boxed_system(Box::new(FailingSystem));
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_err(),
-            "Execution should fail without error handler"
-        );
-
-        if let Err(ExecutionError::SystemError(msg)) = result {
-            assert!(msg.contains("always fails"));
-        } else {
-            panic!("Expected SystemError, got {:?}", result);
-        }
-    }
-
-    #[tokio::test]
-    async fn successful_system_skips_error_handler() {
-        async fn succeeds() -> &'static str {
-            "success"
-        }
-
-        async fn error_handler() -> &'static str {
-            "handled error"
-        }
-
-        let mut graph = Graph::new();
-        let system_id = graph.add_system_node(succeeds);
-        graph.add_error_handler(system_id, |g| {
-            g.add_system(error_handler);
-        });
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok());
-
-        // Should have the success output, not the error handler output
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "success");
-    }
-
-    #[tokio::test]
-    async fn timeout_triggers_handler() {
-        use core::time::Duration;
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        // System that takes a long time
-        struct SlowSystem;
-
-        impl System for SlowSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    Ok(42)
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "slow_system"
-            }
-        }
-
-        async fn timeout_handler() -> &'static str {
-            "timeout handled"
-        }
-
-        let mut graph = Graph::new();
-        let slow_id = graph.add_boxed_system(Box::new(SlowSystem));
-        graph.set_timeout(slow_id, Duration::from_millis(10));
-        graph.add_timeout_handler(slow_id, |g| {
-            g.add_system(timeout_handler);
-        });
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_ok(),
-            "Execution should succeed via timeout handler: {:?}",
-            result.err()
-        );
-
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "timeout handled");
-    }
-
-    #[tokio::test]
-    async fn timeout_error_without_handler() {
-        use core::time::Duration;
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        // System that takes a long time
-        struct SlowSystem;
-
-        impl System for SlowSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    tokio::time::sleep(Duration::from_secs(10)).await;
-                    Ok(42)
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "slow_system"
-            }
-        }
-
-        let mut graph = Graph::new();
-        let slow_id = graph.add_boxed_system(Box::new(SlowSystem));
-        graph.set_timeout(slow_id, Duration::from_millis(10));
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_err(),
-            "Execution should fail without timeout handler"
-        );
-
-        if let Err(ExecutionError::Timeout { node, timeout }) = result {
-            assert_eq!(node, slow_id);
-            assert_eq!(timeout, Duration::from_millis(10));
-        } else {
-            panic!("Expected Timeout error, got {:?}", result);
-        }
-    }
-
-    #[tokio::test]
-    async fn fast_system_does_not_timeout() {
-        use core::time::Duration;
-
-        async fn fast_system() -> &'static str {
-            "fast result"
-        }
-
-        async fn timeout_handler() -> &'static str {
-            "timeout handled"
-        }
-
-        let mut graph = Graph::new();
-        let fast_id = graph.add_system_node(fast_system);
-        graph.set_timeout(fast_id, Duration::from_secs(10));
-        graph.add_timeout_handler(fast_id, |g| {
-            g.add_system(timeout_handler);
-        });
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok());
-
-        // Should have fast result, not timeout handler
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "fast result");
-    }
-
-    #[tokio::test]
-    async fn parallel_execution_runs_all_branches() {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        // Counter to track how many branches executed
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-        struct CountingSystem {
-            value: i32,
-        }
-
-        impl System for CountingSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    COUNTER.fetch_add(1, Ordering::SeqCst);
-                    Ok(self.value)
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "counting_system"
-            }
-        }
-
-        // Reset counter
-        COUNTER.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_parallel(
-            "parallel",
-            vec![
-                |g: &mut Graph| {
-                    g.add_boxed_system(Box::new(CountingSystem { value: 1 }));
-                },
-                |g: &mut Graph| {
-                    g.add_boxed_system(Box::new(CountingSystem { value: 2 }));
-                },
-                |g: &mut Graph| {
-                    g.add_boxed_system(Box::new(CountingSystem { value: 3 }));
-                },
-            ],
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_ok(),
-            "Parallel execution failed: {:?}",
-            result.err()
-        );
-
-        // All 3 branches should have executed
-        assert_eq!(COUNTER.load(Ordering::SeqCst), 3);
-
-        // Result should show nodes executed (parallel + 3 systems + join = 5, or just systems)
-        let execution_result = result.unwrap();
-        assert!(execution_result.nodes_executed >= 3);
-    }
-
-    #[tokio::test]
-    async fn parallel_branch_failure_stops_execution() {
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        struct FailingBranch;
-
-        impl System for FailingBranch {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move { Err(SystemError::ExecutionError("branch failed".into())) })
-            }
-
-            fn name(&self) -> &'static str {
-                "failing_branch"
-            }
-        }
-
-        async fn success_branch() -> i32 {
-            42
-        }
-
-        let mut graph = Graph::new();
-        graph.add_parallel(
-            "parallel",
-            vec![
-                |g: &mut Graph| {
-                    g.add_system(success_branch);
-                },
-                |g: &mut Graph| {
-                    g.add_boxed_system(Box::new(FailingBranch));
-                },
-            ],
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_err(),
-            "Parallel execution should fail when a branch fails"
-        );
-
-        if let Err(ExecutionError::SystemError(msg)) = result {
-            assert!(msg.contains("branch failed"));
-        } else {
-            panic!("Expected SystemError, got {:?}", result);
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Decision node tests - false branch
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn decision_takes_false_branch() {
-        #[derive(Debug)]
-        struct Decision {
-            should_branch: bool,
-        }
-
-        async fn make_decision() -> Decision {
-            Decision {
-                should_branch: false, // This time take false branch
-            }
-        }
-
-        async fn true_path() -> &'static str {
-            "took true path"
-        }
-
-        async fn false_path() -> &'static str {
-            "took false path"
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(make_decision);
-        graph.add_conditional_branch::<Decision, _, _, _>(
-            "branch",
-            |decision| decision.should_branch,
-            |g| {
-                g.add_system(true_path);
-            },
-            |g| {
-                g.add_system(false_path);
-            },
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok(), "Execution failed: {:?}", result.err());
-
-        // Should have taken the false branch
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "took false path");
-    }
-
-    #[test]
-    fn decision_missing_predicate_error_display() {
-        // Test that MissingPredicate error displays correctly
-        // We can't easily create a malformed graph via public API, but we can
-        // verify the error type works correctly
-        let decision_id = NodeId::new(0);
-        let err = ExecutionError::MissingPredicate(decision_id);
-        assert!(format!("{err}").contains("missing predicate"));
-        assert!(format!("{err}").contains("node_0"));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Loop node tests
-    // ─────────────────────────────────────────────────────────────────────
-    //
-    // ## Loop Execution Semantics
-    //
-    // 1. **Predicate Timing**: The termination predicate is checked BEFORE
-    //    each iteration. It reads from `Out<T>` in the context.
-    //
-    // 2. **Output Priming**: For loops with termination predicates, output
-    //    must exist before entering the loop. Add a system before the loop
-    //    that produces the initial output value.
-    //
-    // 3. **Exit Path**: After the loop completes (via predicate or max
-    //    iterations), the executor proceeds to the next sequential node.
-    //
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn loop_max_iterations_exceeded_error() {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        static NEVER_DONE_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-        #[derive(Debug)]
-        struct NeverDone {
-            done: bool,
-        }
-
-        struct NeverDoneSystem;
-
-        impl System for NeverDoneSystem {
-            type Output = NeverDone;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    NEVER_DONE_COUNT.fetch_add(1, Ordering::SeqCst);
-                    Ok(NeverDone { done: false })
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "never_done_system"
-            }
-        }
-
-        async fn init() -> NeverDone {
-            NeverDone { done: false }
-        }
-
-        NEVER_DONE_COUNT.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_system(init); // Prime the output
-        graph.add_loop::<NeverDone, _, _>(
-            "infinite_loop",
-            |state| state.done, // Never returns true
-            |g| {
-                g.add_boxed_system(Box::new(NeverDoneSystem));
-            },
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new().with_default_max_iterations(10);
-
-        let result = executor.execute(&graph, &mut ctx).await;
-
-        // Should error due to max iterations exceeded
-        assert!(result.is_err());
-        if let Err(ExecutionError::MaxIterationsExceeded { max, .. }) = result {
-            assert_eq!(max, 10);
-        } else {
-            panic!("Expected MaxIterationsExceeded, got {:?}", result);
-        }
-
-        // Should have iterated exactly 10 times before stopping
-        assert_eq!(NEVER_DONE_COUNT.load(Ordering::SeqCst), 10);
-    }
-
-    #[tokio::test]
-    async fn loop_body_executes_correct_iterations() {
-        // This test verifies that loop body executes the expected number
-        // of times and completes successfully when loop is terminal.
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        static BODY_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-        struct BodySystem;
-
-        impl System for BodySystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    let count = BODY_COUNT.fetch_add(1, Ordering::SeqCst);
-                    Ok(count as i32)
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "body_system"
-            }
-        }
-
-        BODY_COUNT.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_loop_n("count_loop", 7, |g| {
-            g.add_boxed_system(Box::new(BodySystem));
-        });
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-
-        // Loop body should have executed exactly 7 times
-        assert_eq!(BODY_COUNT.load(Ordering::SeqCst), 7);
-
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
-        assert_eq!(result.unwrap().nodes_executed, 8); // 1 loop node + 7 body executions
-    }
-
-    #[tokio::test]
-    async fn loop_predicate_terminates_early() {
-        // This test verifies that the predicate can terminate the loop
-        // before max iterations and completes successfully.
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        static PRED_BODY_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-        #[derive(Debug)]
-        struct Counter {
-            count: usize,
-        }
-
-        struct CounterSystem;
-
-        impl System for CounterSystem {
-            type Output = Counter;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    let count = PRED_BODY_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
-                    Ok(Counter { count })
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "counter_system"
-            }
-        }
-
-        async fn init() -> Counter {
-            Counter { count: 0 }
-        }
-
-        PRED_BODY_COUNT.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_system(init); // Prime the output
-        graph.add_loop::<Counter, _, _>(
-            "early_exit_loop",
-            |counter| counter.count >= 3, // Exit after 3 iterations
-            |g| {
-                g.add_boxed_system(Box::new(CounterSystem));
-            },
-        );
-
-        let mut ctx = SystemContext::new();
-        // Set high max to ensure predicate triggers first
-        let executor = GraphExecutor::new().with_default_max_iterations(100);
-
-        let result = executor.execute(&graph, &mut ctx).await;
-
-        // Should have executed exactly 3 times before predicate returned true
-        assert_eq!(PRED_BODY_COUNT.load(Ordering::SeqCst), 3);
-
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
-        // 1 init + 1 loop node + 3 body executions = 5 nodes
-        assert_eq!(result.unwrap().nodes_executed, 5);
-    }
-
-    #[tokio::test]
-    async fn loop_continues_to_next_sequential_node() {
-        // This test verifies that after a loop completes, execution
-        // continues to the next sequential node in the graph.
-        use core::sync::atomic::{AtomicUsize, Ordering};
-
-        static LOOP_BODY_COUNT: AtomicUsize = AtomicUsize::new(0);
-        static AFTER_LOOP_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-        async fn loop_body() {
-            LOOP_BODY_COUNT.fetch_add(1, Ordering::SeqCst);
-        }
-
-        async fn after_loop() {
-            AFTER_LOOP_COUNT.fetch_add(1, Ordering::SeqCst);
-        }
-
-        LOOP_BODY_COUNT.store(0, Ordering::SeqCst);
-        AFTER_LOOP_COUNT.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_loop_n("test_loop", 3, |g| {
-            g.add_system(loop_body);
-        });
-        graph.add_system(after_loop); // Should execute after loop completes
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
-
-        // Loop body should have executed 3 times
-        assert_eq!(LOOP_BODY_COUNT.load(Ordering::SeqCst), 3);
-
-        // After-loop system should have executed exactly once
-        assert_eq!(AFTER_LOOP_COUNT.load(Ordering::SeqCst), 1);
-
-        // 1 loop node + 3 body + 1 after = 5 nodes
-        assert_eq!(result.unwrap().nodes_executed, 5);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Output chaining tests
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn output_chaining_between_systems() {
-        use polaris_system::param::{Out, SystemParam};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        #[derive(Debug, Clone)]
-        struct FirstOutput {
-            value: i32,
-        }
-
-        #[derive(Debug, Clone)]
-        struct SecondOutput {
-            doubled: i32,
-        }
-
-        async fn first_system() -> FirstOutput {
-            FirstOutput { value: 21 }
-        }
-
-        // Second system reads first system's output
-        struct SecondSystem;
-
-        impl System for SecondSystem {
-            type Output = SecondOutput;
-
-            fn run<'a>(
-                &'a self,
-                ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    let first = Out::<FirstOutput>::fetch(ctx)?;
-                    Ok(SecondOutput {
-                        doubled: first.value * 2,
-                    })
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "second_system"
-            }
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(first_system);
-        graph.add_boxed_system(Box::new(SecondSystem));
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(result.is_ok(), "Output chaining failed: {:?}", result.err());
-
-        // Second system should have read first system's output
-        let output = ctx.get_output::<SecondOutput>().unwrap();
-        assert_eq!(output.doubled, 42);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Nested control flow tests
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn nested_loop_in_parallel_branch() {
-        use core::sync::atomic::{AtomicUsize, Ordering};
-        use polaris_system::system::{BoxFuture, System, SystemError};
-
-        static NESTED_LOOP_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-        struct NestedSystem;
-
-        impl System for NestedSystem {
-            type Output = i32;
-
-            fn run<'a>(
-                &'a self,
-                _ctx: &'a SystemContext<'_>,
-            ) -> BoxFuture<'a, Result<Self::Output, SystemError>> {
-                Box::pin(async move {
-                    NESTED_LOOP_COUNT.fetch_add(1, Ordering::SeqCst);
-                    Ok(1)
-                })
-            }
-
-            fn name(&self) -> &'static str {
-                "nested_system"
-            }
-        }
-
-        NESTED_LOOP_COUNT.store(0, Ordering::SeqCst);
-
-        let mut graph = Graph::new();
-        graph.add_parallel(
-            "outer_parallel",
-            vec![
-                |g: &mut Graph| {
-                    // Branch 1: A loop with 3 iterations
-                    g.add_loop_n("nested_loop", 3, |inner| {
-                        inner.add_boxed_system(Box::new(NestedSystem));
-                    });
-                },
-                |g: &mut Graph| {
-                    // Branch 2: Simple system
-                    g.add_boxed_system(Box::new(NestedSystem));
-                },
-            ],
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        // The nested loop in branch 1 runs 3 times, branch 2 runs 1 system
-        // Total: 4 executions of NestedSystem
-        assert_eq!(
-            NESTED_LOOP_COUNT.load(Ordering::SeqCst),
-            4,
-            "Expected 4 executions (3 from nested loop + 1 from simple branch)"
-        );
-
-        assert!(result.is_ok(), "Expected Ok, got {:?}", result);
-    }
-
-    #[tokio::test]
-    async fn recursion_limit_exceeded() {
-        // Test that deeply nested control flow hits the recursion limit
-        let executor = GraphExecutor::new().with_max_recursion_depth(2);
-        assert_eq!(executor.max_recursion_depth, 2);
-
-        // Verify the error display
-        let err = ExecutionError::RecursionLimitExceeded { depth: 3, max: 2 };
-        let msg = format!("{err}");
-        assert!(msg.contains("recursion limit exceeded"));
-        assert!(msg.contains("depth 3"));
-        assert!(msg.contains("max 2"));
-    }
-
-    #[test]
     fn executor_with_custom_recursion_depth() {
         let executor = GraphExecutor::new().with_max_recursion_depth(128);
         assert_eq!(executor.max_recursion_depth, 128);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Switch node tests
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn switch_routes_to_matching_case() {
-        #[derive(Debug)]
-        struct RouterOutput {
-            action: &'static str,
-        }
-
-        async fn router() -> RouterOutput {
-            RouterOutput { action: "tool" }
-        }
-
-        async fn tool_handler() -> &'static str {
-            "executed tool"
-        }
-
-        async fn respond_handler() -> &'static str {
-            "executed respond"
-        }
-
-        // Define handlers as named functions to work around closure type differences
-        fn build_tool(g: &mut Graph) {
-            g.add_system(tool_handler);
-        }
-        fn build_respond(g: &mut Graph) {
-            g.add_system(respond_handler);
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(router);
-        graph.add_switch::<RouterOutput, _, _>(
-            "route",
-            |o| o.action,
-            vec![
-                ("tool", build_tool as fn(&mut Graph)),
-                ("respond", build_respond),
-            ],
-            None,
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_ok(),
-            "Switch execution failed: {:?}",
-            result.err()
-        );
-
-        // Should have taken the "tool" branch
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "executed tool");
-    }
-
-    #[tokio::test]
-    async fn switch_routes_to_default_when_no_match() {
-        #[derive(Debug)]
-        struct RouterOutput {
-            action: &'static str,
-        }
-
-        async fn router() -> RouterOutput {
-            RouterOutput { action: "unknown" }
-        }
-
-        async fn tool_handler() -> &'static str {
-            "executed tool"
-        }
-
-        async fn default_handler() -> &'static str {
-            "executed default"
-        }
-
-        fn build_tool(g: &mut Graph) {
-            g.add_system(tool_handler);
-        }
-        fn build_default(g: &mut Graph) {
-            g.add_system(default_handler);
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(router);
-        graph.add_switch::<RouterOutput, _, _>(
-            "route",
-            |o| o.action,
-            vec![("tool", build_tool as fn(&mut Graph))],
-            Some(build_default as fn(&mut Graph)),
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_ok(),
-            "Switch execution failed: {:?}",
-            result.err()
-        );
-
-        // Should have taken the default branch
-        let output = ctx.get_output::<&'static str>().unwrap();
-        assert_eq!(*output, "executed default");
-    }
-
-    #[tokio::test]
-    async fn switch_error_when_no_match_and_no_default() {
-        #[derive(Debug)]
-        struct RouterOutput {
-            action: &'static str,
-        }
-
-        async fn router() -> RouterOutput {
-            RouterOutput {
-                action: "nonexistent",
-            }
-        }
-
-        async fn tool_handler() -> &'static str {
-            "executed tool"
-        }
-
-        fn build_tool(g: &mut Graph) {
-            g.add_system(tool_handler);
-        }
-
-        let mut graph = Graph::new();
-        graph.add_system(router);
-        graph.add_switch::<RouterOutput, _, _>(
-            "route",
-            |o| o.action,
-            vec![("tool", build_tool as fn(&mut Graph))],
-            None,
-        );
-
-        let mut ctx = SystemContext::new();
-        let executor = GraphExecutor::new();
-
-        let result = executor.execute(&graph, &mut ctx).await;
-        assert!(
-            result.is_err(),
-            "Expected error when no match and no default"
-        );
-
-        if let Err(ExecutionError::NoMatchingCase { key, .. }) = result {
-            assert_eq!(key, "nonexistent");
-        } else {
-            panic!("Expected NoMatchingCase error, got {:?}", result);
-        }
-    }
-
-    #[test]
-    fn switch_error_display() {
-        let err = ExecutionError::MissingDiscriminator(NodeId::new(5));
-        assert!(format!("{err}").contains("missing discriminator"));
-        assert!(format!("{err}").contains("node_5"));
-
-        let err = ExecutionError::NoMatchingCase {
-            node: NodeId::new(3),
-            key: "unknown",
-        };
-        let msg = format!("{err}");
-        assert!(msg.contains("no matching case"));
-        assert!(msg.contains("unknown"));
-        assert!(msg.contains("node_3"));
     }
 }

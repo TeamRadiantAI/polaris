@@ -70,7 +70,7 @@ async fn main() {
     let graph = ReActAgent.to_graph();
     let executor = GraphExecutor::new().with_default_max_iterations(10);
 
-    if let Err(err) = executor.execute(&graph, &mut ctx).await {
+    if let Err(err) = executor.execute(&graph, &mut ctx, None).await {
         tracing::error!("Error: {err}");
     }
 }

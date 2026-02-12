@@ -128,7 +128,7 @@ impl Outputs {
     /// Inserts a type-erased system output.
     ///
     /// This is used by the executor to store outputs when the concrete type
-    /// is not known at compile time. The `type_id` must match the actual type
+    /// is not known at compile time. The `type_id` must match the correct type
     /// of the boxed value.
     ///
     /// If an output with this type ID already exists, it is replaced.
@@ -195,6 +195,20 @@ impl Outputs {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.storage.is_empty()
+    }
+
+    /// Merges all outputs from `other` into this container.
+    ///
+    /// Consumes `other`, moving all entries into `self`.
+    /// If both containers have an output of the same type, the entry
+    /// from `other` overwrites the one in `self`.
+    ///
+    /// This is used by the executor to propagate outputs from child
+    /// contexts (parallel branches) back to the parent context.
+    pub fn merge_from(&mut self, other: Outputs) {
+        for (id, entry) in other.storage {
+            self.storage.insert(id, entry);
+        }
     }
 }
 
@@ -398,6 +412,48 @@ mod tests {
 
         // Should still be only one entry
         assert_eq!(outputs.len(), 1);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // merge_from tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn merge_from_overwrites_existing() {
+        let mut target = Outputs::new();
+        target.insert(ReasoningResult {
+            action: "original".into(),
+        });
+
+        let mut source = Outputs::new();
+        source.insert(ReasoningResult {
+            action: "overwritten".into(),
+        });
+
+        target.merge_from(source);
+
+        assert_eq!(target.len(), 1);
+        assert_eq!(
+            target.get::<ReasoningResult>().unwrap().action,
+            "overwritten"
+        );
+    }
+
+    #[test]
+    fn merge_from_combines_different_types() {
+        let mut target = Outputs::new();
+        target.insert(ReasoningResult {
+            action: "reasoning".into(),
+        });
+
+        let mut source = Outputs::new();
+        source.insert(ToolResult { value: 99 });
+
+        target.merge_from(source);
+
+        assert_eq!(target.len(), 2);
+        assert_eq!(target.get::<ReasoningResult>().unwrap().action, "reasoning");
+        assert_eq!(target.get::<ToolResult>().unwrap().value, 99);
     }
 
     #[test]

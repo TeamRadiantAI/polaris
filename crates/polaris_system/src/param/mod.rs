@@ -56,6 +56,8 @@
 
 mod access;
 
+use variadics_please::all_tuples;
+
 pub use access::{Access, AccessMode, SystemAccess};
 
 use crate::resource::{
@@ -277,7 +279,7 @@ impl<'parent> SystemContext<'parent> {
     /// Inserts a type-erased resource into this context's scope.
     ///
     /// This is used internally by the server to instantiate local resources
-    /// from factories. The `type_id` must match the actual type of the boxed
+    /// from factories. The `type_id` must match the correct type of the boxed
     /// resource.
     pub fn insert_boxed(
         &mut self,
@@ -435,7 +437,7 @@ impl<'parent> SystemContext<'parent> {
     /// Inserts a type-erased system output.
     ///
     /// Called by the executor when the concrete output type is not known
-    /// at compile time. The `type_id` must match the actual type of the value.
+    /// at compile time. The `type_id` must match the correct type of the value.
     pub fn insert_output_boxed(
         &mut self,
         type_id: core::any::TypeId,
@@ -737,14 +739,8 @@ macro_rules! impl_system_param_tuple {
     };
 }
 
-impl_system_param_tuple!(P0);
-impl_system_param_tuple!(P0, P1);
-impl_system_param_tuple!(P0, P1, P2);
-impl_system_param_tuple!(P0, P1, P2, P3);
-impl_system_param_tuple!(P0, P1, P2, P3, P4);
-impl_system_param_tuple!(P0, P1, P2, P3, P4, P5);
-impl_system_param_tuple!(P0, P1, P2, P3, P4, P5, P6);
-impl_system_param_tuple!(P0, P1, P2, P3, P4, P5, P6, P7);
+// Generate impls for tuples of size 1 to 8
+all_tuples!(impl_system_param_tuple, 1, 8, P);
 
 #[cfg(test)]
 mod tests {

@@ -1,27 +1,48 @@
-//! Edge types for agent graphs.
+//! Edge types for graphs.
 //!
 //! Edges are the connections between nodes, defining control flow
-//! through the agent graph.
+//! through the graph.
 
 use core::fmt;
+use std::sync::Arc;
 
 use crate::node::NodeId;
 
 /// Unique identifier for an edge in the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EdgeId(pub(crate) usize);
+///
+/// Edge IDs are generated using nanoid, providing globally unique identifiers
+/// that don't require coordination between graph instances. This enables
+/// merging graphs without ID collision handling.
+///
+/// Internally uses `Arc<str>` for cheap cloning (reference count bump only).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EdgeId(Arc<str>);
 
 impl EdgeId {
-    /// Creates a new edge ID.
+    /// Creates a new edge ID with a unique nanoid.
     #[must_use]
-    pub fn new(id: usize) -> Self {
-        Self(id)
+    pub fn new() -> Self {
+        Self(nanoid::nanoid!().into())
     }
 
-    /// Returns the raw ID value.
+    /// Creates an edge ID from a specific string value.
+    ///
+    /// This is primarily useful for testing or when restoring serialized graphs.
     #[must_use]
-    pub fn index(&self) -> usize {
-        self.0
+    pub fn from_string(id: impl Into<Arc<str>>) -> Self {
+        Self(id.into())
+    }
+
+    /// Returns the ID as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for EdgeId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -56,12 +77,12 @@ impl Edge {
     #[must_use]
     pub fn id(&self) -> EdgeId {
         match self {
-            Edge::Sequential(edge) => edge.id,
-            Edge::Conditional(edge) => edge.id,
-            Edge::Parallel(edge) => edge.id,
-            Edge::LoopBack(edge) => edge.id,
-            Edge::Error(edge) => edge.id,
-            Edge::Timeout(edge) => edge.id,
+            Edge::Sequential(edge) => edge.id.clone(),
+            Edge::Conditional(edge) => edge.id.clone(),
+            Edge::Parallel(edge) => edge.id.clone(),
+            Edge::LoopBack(edge) => edge.id.clone(),
+            Edge::Error(edge) => edge.id.clone(),
+            Edge::Timeout(edge) => edge.id.clone(),
         }
     }
 
@@ -69,12 +90,12 @@ impl Edge {
     #[must_use]
     pub fn from(&self) -> NodeId {
         match self {
-            Edge::Sequential(edge) => edge.from,
-            Edge::Conditional(edge) => edge.from,
-            Edge::Parallel(edge) => edge.from,
-            Edge::LoopBack(edge) => edge.from,
-            Edge::Error(edge) => edge.from,
-            Edge::Timeout(edge) => edge.from,
+            Edge::Sequential(edge) => edge.from.clone(),
+            Edge::Conditional(edge) => edge.from.clone(),
+            Edge::Parallel(edge) => edge.from.clone(),
+            Edge::LoopBack(edge) => edge.from.clone(),
+            Edge::Error(edge) => edge.from.clone(),
+            Edge::Timeout(edge) => edge.from.clone(),
         }
     }
 }
@@ -96,8 +117,12 @@ pub struct SequentialEdge {
 impl SequentialEdge {
     /// Creates a new sequential edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, to: NodeId) -> Self {
-        Self { id, from, to }
+    pub fn new(from: NodeId, to: NodeId) -> Self {
+        Self {
+            id: EdgeId::new(),
+            from,
+            to,
+        }
     }
 }
 
@@ -119,9 +144,9 @@ pub struct ConditionalEdge {
 impl ConditionalEdge {
     /// Creates a new conditional edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, true_target: NodeId, false_target: NodeId) -> Self {
+    pub fn new(from: NodeId, true_target: NodeId, false_target: NodeId) -> Self {
         Self {
-            id,
+            id: EdgeId::new(),
             from,
             true_target,
             false_target,
@@ -145,8 +170,12 @@ pub struct ParallelEdge {
 impl ParallelEdge {
     /// Creates a new parallel edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, targets: Vec<NodeId>) -> Self {
-        Self { id, from, targets }
+    pub fn new(from: NodeId, targets: Vec<NodeId>) -> Self {
+        Self {
+            id: EdgeId::new(),
+            from,
+            targets,
+        }
     }
 }
 
@@ -166,8 +195,12 @@ pub struct LoopBackEdge {
 impl LoopBackEdge {
     /// Creates a new loop-back edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, to: NodeId) -> Self {
-        Self { id, from, to }
+    pub fn new(from: NodeId, to: NodeId) -> Self {
+        Self {
+            id: EdgeId::new(),
+            from,
+            to,
+        }
     }
 }
 
@@ -187,8 +220,12 @@ pub struct ErrorEdge {
 impl ErrorEdge {
     /// Creates a new error edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, to: NodeId) -> Self {
-        Self { id, from, to }
+    pub fn new(from: NodeId, to: NodeId) -> Self {
+        Self {
+            id: EdgeId::new(),
+            from,
+            to,
+        }
     }
 }
 
@@ -208,8 +245,12 @@ pub struct TimeoutEdge {
 impl TimeoutEdge {
     /// Creates a new timeout edge.
     #[must_use]
-    pub fn new(id: EdgeId, from: NodeId, to: NodeId) -> Self {
-        Self { id, from, to }
+    pub fn new(from: NodeId, to: NodeId) -> Self {
+        Self {
+            id: EdgeId::new(),
+            from,
+            to,
+        }
     }
 }
 
@@ -218,37 +259,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn edge_id_display() {
-        let id = EdgeId::new(42);
-        assert_eq!(format!("{id}"), "edge_42");
-    }
-
-    #[test]
-    fn edge_id_equality() {
-        let id1 = EdgeId::new(1);
-        let id2 = EdgeId::new(1);
-        let id3 = EdgeId::new(2);
-
-        assert_eq!(id1, id2);
-        assert_ne!(id1, id3);
+    fn edge_id_uniqueness() {
+        // Generated IDs should be unique
+        let id1 = EdgeId::new();
+        let id2 = EdgeId::new();
+        assert_ne!(id1, id2);
     }
 
     #[test]
     fn sequential_edge_creation() {
-        let edge = SequentialEdge::new(EdgeId::new(0), NodeId::new(1), NodeId::new(2));
-        assert_eq!(edge.id.index(), 0);
-        assert_eq!(edge.from.index(), 1);
-        assert_eq!(edge.to.index(), 2);
+        let from = NodeId::from_string("n1");
+        let to = NodeId::from_string("n2");
+        let edge = SequentialEdge::new(from.clone(), to.clone());
+        // ID is auto-generated
+        assert!(!edge.id.as_str().is_empty());
+        assert_eq!(edge.from.as_str(), "n1");
+        assert_eq!(edge.to.as_str(), "n2");
     }
 
     #[test]
     fn edge_enum_accessors() {
-        let seq = Edge::Sequential(SequentialEdge::new(
-            EdgeId::new(0),
-            NodeId::new(1),
-            NodeId::new(2),
-        ));
-        assert_eq!(seq.id().index(), 0);
-        assert_eq!(seq.from().index(), 1);
+        let from = NodeId::from_string("n1");
+        let to = NodeId::from_string("n2");
+        let seq = Edge::Sequential(SequentialEdge::new(from, to));
+        assert!(!seq.id().as_str().is_empty());
+        assert_eq!(seq.from().as_str(), "n1");
     }
 }

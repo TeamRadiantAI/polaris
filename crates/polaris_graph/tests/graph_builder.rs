@@ -368,19 +368,15 @@ fn ids_are_sequential_across_subgraphs() {
         )
         .add_system(third_step);
 
-    // Collect and sort node IDs
-    let mut node_ids: Vec<_> = graph.nodes().iter().map(|n| n.id().index()).collect();
-    node_ids.sort();
+    // Collect node IDs
+    let node_ids: Vec<_> = graph.nodes().iter().map(Node::id).collect();
 
-    // Verify IDs are sequential (no gaps from old offset system)
-    for i in 1..node_ids.len() {
-        let gap = node_ids[i] - node_ids[i - 1];
-        assert!(
-            gap == 1,
-            "Non-sequential node IDs: {} and {} (gap of {})",
-            node_ids[i - 1],
-            node_ids[i],
-            gap
-        );
-    }
+    // Verify all IDs are unique (no collisions)
+    let unique_ids: std::collections::HashSet<_> = node_ids.iter().collect();
+    assert_eq!(
+        node_ids.len(),
+        unique_ids.len(),
+        "All node IDs should be unique, found {} duplicates",
+        node_ids.len() - unique_ids.len()
+    );
 }

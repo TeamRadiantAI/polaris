@@ -296,13 +296,13 @@ impl Resources {
     /// Inserts a type-erased resource into the container.
     ///
     /// This is used internally by factories that create resources dynamically.
-    /// The `type_id` must match the actual type of the boxed resource.
+    /// The `type_id` must match the type of the boxed resource.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that `type_id` corresponds to the actual type
-    /// stored in `resource`. Mismatches will cause panics when the resource
-    /// is accessed via `get::<T>()`.
+    /// The caller must ensure that `type_id` corresponds to the type stored
+    /// in `resource`. Mismatches will cause panics when the resource is
+    /// accessed via `get::<T>()`.
     pub fn insert_boxed(&mut self, type_id: TypeId, resource: Box<dyn Any + Send + Sync>) {
         let id = ResourceId(type_id);
         let entry = ResourceEntry::new_boxed(resource);
