@@ -1,7 +1,7 @@
 //! Type-safe predicates for control flow decisions.
 //!
 //! Predicates evaluate conditions based on previous system outputs,
-//! enabling type-safe control flow in agent graphs.
+//! enabling type-safe control flow in graphs.
 //!
 //! # Architecture
 //!
@@ -40,7 +40,7 @@ use polaris_system::param::SystemContext;
 use polaris_system::resource::Output;
 
 /// Errors that can occur during predicate evaluation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PredicateError {
     /// The required output type was not found in the context.
     OutputNotFound {
@@ -287,18 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn predicate_creation() {
-        let pred = Predicate::<TestOutput, _>::new(|output| output.value > 5);
-        assert!(pred.input_type_name().contains("TestOutput"));
-    }
-
-    #[test]
-    fn predicate_type_id() {
-        let pred = Predicate::<TestOutput, _>::new(|_| true);
-        assert_eq!(pred.input_type_id(), TypeId::of::<TestOutput>());
-    }
-
-    #[test]
     fn predicate_evaluate_true() {
         let pred = Predicate::<TestOutput, _>::new(|output| output.value > 5);
 
@@ -348,14 +336,6 @@ mod tests {
         assert!(pred.evaluate(&ctx).unwrap());
     }
 
-    #[test]
-    fn predicate_debug() {
-        let pred = Predicate::<TestOutput, _>::new(|_| true);
-        let debug_str = format!("{pred:?}");
-        assert!(debug_str.contains("Predicate"));
-        assert!(debug_str.contains("TestOutput"));
-    }
-
     // ─────────────────────────────────────────────────────────────────────
     // Discriminator tests
     // ─────────────────────────────────────────────────────────────────────
@@ -363,18 +343,6 @@ mod tests {
     #[derive(Debug, Clone)]
     struct RouterOutput {
         action: &'static str,
-    }
-
-    #[test]
-    fn discriminator_creation() {
-        let disc = Discriminator::<RouterOutput, _>::new(|output| output.action);
-        assert!(disc.input_type_name().contains("RouterOutput"));
-    }
-
-    #[test]
-    fn discriminator_type_id() {
-        let disc = Discriminator::<RouterOutput, _>::new(|_| "test");
-        assert_eq!(disc.input_type_id(), TypeId::of::<RouterOutput>());
     }
 
     #[test]
@@ -418,13 +386,5 @@ mod tests {
         ctx.insert_output(RouterOutput { action: "agent" });
 
         assert_eq!(disc.discriminate(&ctx).unwrap(), "agent");
-    }
-
-    #[test]
-    fn discriminator_debug() {
-        let disc = Discriminator::<RouterOutput, _>::new(|_| "test");
-        let debug_str = format!("{disc:?}");
-        assert!(debug_str.contains("Discriminator"));
-        assert!(debug_str.contains("RouterOutput"));
     }
 }

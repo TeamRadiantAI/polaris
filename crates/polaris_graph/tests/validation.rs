@@ -147,7 +147,7 @@ fn validation_error_no_entry_point_display() {
 
 #[test]
 fn validation_error_invalid_entry_point_display() {
-    let err = ValidationError::InvalidEntryPoint(NodeId::new(5));
+    let err = ValidationError::InvalidEntryPoint(NodeId::from_string("5"));
     let msg = format!("{err}");
     assert!(msg.contains("invalid node"));
     assert!(msg.contains("node_5"));
@@ -156,7 +156,7 @@ fn validation_error_invalid_entry_point_display() {
 #[test]
 fn validation_error_missing_predicate_display() {
     let err = ValidationError::MissingPredicate {
-        node: NodeId::new(3),
+        node: NodeId::from_string("3"),
         name: "decision",
     };
     let msg = format!("{err}");
@@ -167,7 +167,7 @@ fn validation_error_missing_predicate_display() {
 #[test]
 fn validation_error_missing_branch_display() {
     let err = ValidationError::MissingBranch {
-        node: NodeId::new(2),
+        node: NodeId::from_string("2"),
         name: "choice",
         branch: "true",
     };
@@ -179,7 +179,7 @@ fn validation_error_missing_branch_display() {
 #[test]
 fn validation_error_no_termination_condition_display() {
     let err = ValidationError::NoTerminationCondition {
-        node: NodeId::new(1),
+        node: NodeId::from_string("1"),
         name: "infinite_loop",
     };
     let msg = format!("{err}");

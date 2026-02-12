@@ -1,7 +1,7 @@
 [package]
 name = "polaris_graph"
 version = "0.0.1"
-description = "Graph-based agent execution primitives for Polaris (Layer 2)."
+description = "Graph execution primitives for Polaris (Layer 2)."
 edition = "2024"
 keywords = []
 
@@ -12,6 +12,10 @@ workspace = true
 polaris_system = { path = "../polaris_system" }
 tokio = { version = "1", features = ["time"] }
 futures = "0.3"
+hashbrown = "0.16.1"
+parking_lot = "0.12.5"
+nanoid = "0.4"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+proptest = "1"

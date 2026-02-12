@@ -88,7 +88,7 @@
 ///
 /// # Implementing API
 ///
-/// Simply implement this marker trait for your type:
+/// Implement this marker trait for your type:
 ///
 /// ```ignore
 /// use polaris_system::api::API;

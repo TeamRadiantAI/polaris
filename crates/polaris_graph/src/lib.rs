@@ -1,7 +1,7 @@
 //! Graph-based execution primitives for Polaris (Layer 2).
 //!
 //! `polaris_graph` provides the core abstractions for defining behavior as
-//! directed graphs of systems. This is the foundation for composable,
+//! directed graphs of systems. This is the foundation for safe, composable,
 //! inspectable agent behavior.
 //!
 //! # Core Concepts
@@ -26,7 +26,7 @@
 //!
 //! let ctx = SystemContext::new();
 //! let executor = GraphExecutor::new();
-//! let result = executor.execute(&graph, &ctx).await?;
+//! let result = executor.execute(&graph, &ctx, None).await?;
 //! ```
 //!
 //! # Architecture
@@ -55,6 +55,12 @@ pub mod node;
 /// Type-safe predicates for control flow decisions.
 pub mod predicate;
 
+/// Lifecycle hooks for graph execution.
+pub mod hooks;
+
+/// Development tools for graph execution (SystemInfo, DevToolsPlugin).
+pub mod dev;
+
 /// Re-export all common types for easy access.
 pub mod prelude {
     pub use crate::edge::{
@@ -75,6 +81,7 @@ pub mod prelude {
 }
 
 // Re-export key types at crate root for convenience
+pub use dev::{DevToolsPlugin, SystemInfo};
 pub use executor::{ExecutionError, ExecutionResult, GraphExecutor, ResourceValidationError};
 pub use graph::{Graph, ValidationError};
 pub use node::NodeId;

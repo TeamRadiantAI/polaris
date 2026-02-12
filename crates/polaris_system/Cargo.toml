@@ -14,6 +14,7 @@ downcast-rs = "2.0.2"
 parking_lot = { version = "0.12.5", features = ["send_guard"] }
 thiserror = "2.0.17"
 hashbrown = "0.16.0"
+variadics_please = "1.1"
 
 # Async runtime
 [dev-dependencies]

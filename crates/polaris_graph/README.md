@@ -1,6 +1,6 @@
 # polaris_graph
 
-Graph-based agent execution primitives for Polaris (Layer 2).
+Graph execution primitives for Polaris (Layer 2).
 
 ## Overview
 

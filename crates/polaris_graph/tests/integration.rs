@@ -119,7 +119,7 @@ async fn full_server_graph_executor_flow() {
 
     // 4. Execute graph with context
     let executor = GraphExecutor::new();
-    let result = executor.execute(&graph, &mut ctx).await;
+    let result = executor.execute(&graph, &mut ctx, None).await;
 
     assert!(
         result.is_ok(),
@@ -157,14 +157,14 @@ async fn multiple_agents_have_isolated_memory() {
 
     // Execute with first agent context
     let mut ctx1 = server.create_context();
-    let _ = executor.execute(&graph, &mut ctx1).await.unwrap();
+    let _ = executor.execute(&graph, &mut ctx1, None).await.unwrap();
 
     // Execute with second agent context
     let mut ctx2 = server.create_context();
-    let _ = executor.execute(&graph, &mut ctx2).await.unwrap();
+    let _ = executor.execute(&graph, &mut ctx2, None).await.unwrap();
 
     // Execute first agent again
-    let _ = executor.execute(&graph, &mut ctx1).await.unwrap();
+    let _ = executor.execute(&graph, &mut ctx1, None).await.unwrap();
 
     // Agent 1 has two entries (ran twice)
     let memory1 = ctx1.get_resource::<AgentMemory>().unwrap();
@@ -193,7 +193,7 @@ async fn child_context_inherits_globals_with_own_locals() {
     let mut child_ctx = parent_ctx.child().with(AgentMemory::new());
 
     // Execute on child
-    let result = executor.execute(&graph, &mut child_ctx).await;
+    let result = executor.execute(&graph, &mut child_ctx, None).await;
     assert!(result.is_ok(), "Child execution failed: {:?}", result.err());
 
     // Child's memory should have the result
@@ -279,7 +279,7 @@ async fn conditional_branch_with_resources() {
     let mut ctx = server.create_context();
     let executor = GraphExecutor::new();
 
-    let result = executor.execute(&graph, &mut ctx).await;
+    let result = executor.execute(&graph, &mut ctx, None).await;
     assert!(result.is_ok());
 
     let output = ctx.get_output::<BranchResult>().unwrap();
@@ -358,7 +358,7 @@ async fn loop_with_local_resource_state() {
     let mut ctx = server.create_context();
     let executor = GraphExecutor::new();
 
-    let result = executor.execute(&graph, &mut ctx).await;
+    let result = executor.execute(&graph, &mut ctx, None).await;
 
     assert!(result.is_ok(), "Expected Ok, got {:?}", result);
 
@@ -384,7 +384,7 @@ async fn validate_resources_passes_when_all_resources_present() {
     let executor = GraphExecutor::new();
 
     // Validation should pass when all resources are available
-    let result = executor.validate_resources(&graph, &ctx);
+    let result = executor.validate_resources(&graph, &ctx, None);
     assert!(result.is_ok(), "Validation failed: {:?}", result.err());
 }
 
@@ -404,7 +404,7 @@ async fn validate_resources_detects_missing_global_resource() {
     let executor = GraphExecutor::new();
 
     // Validation should fail - AppConfig is missing
-    let result = executor.validate_resources(&graph, &ctx);
+    let result = executor.validate_resources(&graph, &ctx, None);
     assert!(result.is_err(), "Expected validation to fail");
 
     let errors = result.unwrap_err();
@@ -441,7 +441,7 @@ async fn validate_resources_detects_missing_local_resource() {
     let executor = GraphExecutor::new();
 
     // Validation should fail - AgentMemory is missing
-    let result = executor.validate_resources(&graph, &ctx);
+    let result = executor.validate_resources(&graph, &ctx, None);
     assert!(result.is_err(), "Expected validation to fail");
 
     let errors = result.unwrap_err();
@@ -480,7 +480,7 @@ async fn validate_resources_checks_hierarchy() {
     let executor = GraphExecutor::new();
 
     // Validation should pass because child can read AppConfig through hierarchy
-    let result = executor.validate_resources(&graph, &child_ctx);
+    let result = executor.validate_resources(&graph, &child_ctx, None);
     assert!(result.is_ok(), "Validation failed: {:?}", result.err());
 }
 
@@ -556,7 +556,7 @@ async fn parallel_diamond_execution() {
     let mut ctx = server.create_context();
     let executor = GraphExecutor::new();
 
-    let result = executor.execute(&graph, &mut ctx).await;
+    let result = executor.execute(&graph, &mut ctx, None).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result.err());
 
     // Verify execution stats
@@ -626,7 +626,7 @@ async fn conditional_diverge_converge_diamond() {
     let mut ctx = server.create_context();
     let executor = GraphExecutor::new();
 
-    let result = executor.execute(&graph, &mut ctx).await;
+    let result = executor.execute(&graph, &mut ctx, None).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result.err());
 
     // Final output should be from the converge step (after the branch)

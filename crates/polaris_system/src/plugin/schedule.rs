@@ -3,8 +3,35 @@
 //! This module provides [`ScheduleId`], which identifies tick schedules that
 //! plugins can register for. Layer 2 defines schedule marker types, and
 //! Layer 3 plugins declare interest in them.
+//!
+//! # Schedule Trait
+//!
+//! The [`Schedule`] trait marks types as schedule identifiers. Layer 2 defines
+//! schedule markers and associates them with events at the Layer 2 level.
+//!
+//! ```ignore
+//! // Layer 2 defines:
+//! pub struct OnSystemStart;
+//! impl Schedule for OnSystemStart {}
+//!
+//! // Layer 3 can then:
+//! hooks.register_observer::<OnSystemStart>("logger", |event| { ... })?;
+//! ```
+//!
+//! # Multi-Schedule Registration
+//!
+//! [`IntoScheduleIds`] enables registering hooks for multiple schedules at once:
+//!
+//! ```ignore
+//! hooks.register_observer::<(OnSystemStart, OnSystemComplete)>(
+//!     "lifecycle_logger",
+//!     |event: &GraphEvent| { ... },
+//! )?;
+//! ```
 
 use core::any::TypeId;
+
+use variadics_please::all_tuples;
 
 /// Identifier for a tick schedule, based on a marker type.
 ///
@@ -83,12 +110,85 @@ impl ScheduleId {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Schedule Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Marker trait for schedule types.
+///
+/// Layer 2 implements this trait for schedule markers. The trait is intentionally
+/// minimal (a pure marker) to keep Layer 1 generic. Event types are defined and
+/// associated with schedules at Layer 2.
+///
+/// # Example
+///
+/// ```ignore
+/// // Layer 2 defines:
+/// pub struct OnSystemStart;
+/// impl Schedule for OnSystemStart {}
+///
+/// // Layer 3 can then use type-safe registration:
+/// hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
+///     if let GraphEvent::SystemStart { system_name, .. } = event {
+///         tracing::info!("System {} starting", system_name);
+///     }
+/// })?;
+/// ```
+pub trait Schedule: 'static {}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IntoScheduleIds Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Trait for types that can be converted into a list of schedule IDs.
+///
+/// This enables registering hooks for multiple schedules at once using tuple syntax:
+///
+/// ```ignore
+/// // Single schedule
+/// hooks.register_observer::<OnSystemStart>("hook", |event| { ... })?;
+///
+/// // Multiple schedules
+/// hooks.register_observer::<(OnSystemStart, OnSystemComplete)>("hook", |event| { ... })?;
+/// ```
+pub trait IntoScheduleIds {
+    /// Returns the schedule IDs for this type.
+    fn schedule_ids() -> Vec<ScheduleId>;
+}
+
+/// Single schedule implements `IntoScheduleIds`.
+impl<S: Schedule> IntoScheduleIds for S {
+    fn schedule_ids() -> Vec<ScheduleId> {
+        vec![ScheduleId::of::<S>()]
+    }
+}
+
+/// Macro to implement `IntoScheduleIds` for tuples of schedules.
+macro_rules! impl_into_schedule_ids_for_tuple {
+    ($($S:ident),*) => {
+        impl<$($S: Schedule),*> IntoScheduleIds for ($($S,)*) {
+            fn schedule_ids() -> Vec<ScheduleId> {
+                vec![$(ScheduleId::of::<$S>()),*]
+            }
+        }
+    };
+}
+
+// Generate implementations for tuples from 2 to 13 elements
+all_tuples!(impl_into_schedule_ids_for_tuple, 2, 13, S);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     struct ScheduleA;
+    impl Schedule for ScheduleA {}
+
     struct ScheduleB;
+    impl Schedule for ScheduleB {}
+
+    struct ScheduleC;
+    impl Schedule for ScheduleC {}
 
     #[test]
     fn schedule_id_equality() {
@@ -110,5 +210,21 @@ mod tests {
     fn schedule_id_type_id() {
         let id = ScheduleId::of::<ScheduleA>();
         assert_eq!(id.type_id(), TypeId::of::<ScheduleA>());
+    }
+
+    #[test]
+    fn into_schedule_ids_single() {
+        let ids = ScheduleA::schedule_ids();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(ids[0], ScheduleId::of::<ScheduleA>());
+    }
+
+    #[test]
+    fn into_schedule_ids_tuple() {
+        let ids = <(ScheduleA, ScheduleB, ScheduleC)>::schedule_ids();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(ids[0], ScheduleId::of::<ScheduleA>());
+        assert_eq!(ids[1], ScheduleId::of::<ScheduleB>());
+        assert_eq!(ids[2], ScheduleId::of::<ScheduleC>());
     }
 }
