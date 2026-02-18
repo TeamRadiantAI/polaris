@@ -42,7 +42,7 @@ use crate::hooks::HooksAPI;
 use crate::hooks::events::GraphEvent;
 use crate::hooks::schedule::OnSystemStart;
 use crate::node::NodeId;
-use polaris_system::plugin::Plugin;
+use polaris_system::plugin::{Plugin, Version};
 use polaris_system::resource::LocalResource;
 use polaris_system::server::Server;
 
@@ -106,6 +106,9 @@ impl SystemInfo {
 pub struct DevToolsPlugin;
 
 impl Plugin for DevToolsPlugin {
+    const ID: &'static str = "polaris::dev_tools";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn build(&self, server: &mut Server) {
         // Initialize HooksAPI if not present
         if !server.contains_api::<HooksAPI>() {

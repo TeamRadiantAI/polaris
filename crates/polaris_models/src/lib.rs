@@ -30,6 +30,9 @@
 //! }
 //! ```
 
+// Self-reference so tool macros can use `polaris_models::` paths within this crate.
+extern crate self as polaris_models;
+
 pub mod error;
 pub mod llm;
 mod plugin;

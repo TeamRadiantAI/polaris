@@ -682,45 +682,6 @@ impl<'a, T: Output> SystemParam for Option<Out<'a, T>> {
     }
 }
 
-/// Optional resource access.
-///
-/// Returns `None` if the resource doesn't exist instead of erroring.
-impl<'a, T: Resource> SystemParam for Option<Res<'a, T>> {
-    type Item<'w> = Option<Res<'w, T>>;
-
-    fn fetch<'w>(ctx: &'w SystemContext<'_>) -> Result<Self::Item<'w>, ParamError> {
-        match <Res<'a, T> as SystemParam>::fetch(ctx) {
-            Ok(res) => Ok(Some(res)),
-            Err(ParamError::ResourceNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
-
-    fn access() -> SystemAccess {
-        <Res<'a, T> as SystemParam>::access()
-    }
-}
-
-/// Optional mutable resource access.
-///
-/// Returns `None` if the resource doesn't exist instead of erroring.
-/// Requires `T: LocalResource` since `ResMut<T>` requires it.
-impl<'a, T: LocalResource> SystemParam for Option<ResMut<'a, T>> {
-    type Item<'w> = Option<ResMut<'w, T>>;
-
-    fn fetch<'w>(ctx: &'w SystemContext<'_>) -> Result<Self::Item<'w>, ParamError> {
-        match <ResMut<'a, T> as SystemParam>::fetch(ctx) {
-            Ok(res) => Ok(Some(res)),
-            Err(ParamError::ResourceNotFound(_)) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
-
-    fn access() -> SystemAccess {
-        <ResMut<'a, T> as SystemParam>::access()
-    }
-}
-
 // Unit type implementation
 impl SystemParam for () {
     type Item<'w> = ();
@@ -833,22 +794,6 @@ mod tests {
 
         let result = Res::<Counter>::fetch(&ctx);
         assert!(matches!(result, Err(ParamError::ResourceNotFound(_))));
-    }
-
-    #[test]
-    fn optional_res_returns_none() {
-        let ctx = SystemContext::new();
-
-        let result = Option::<Res<Counter>>::fetch(&ctx).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn optional_res_returns_some() {
-        let ctx = SystemContext::new().with(Counter { value: 42 });
-        let result = Option::<Res<Counter>>::fetch(&ctx).unwrap();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().value, 42);
     }
 
     #[test]
@@ -1127,46 +1072,6 @@ mod tests {
 
         assert!(ctx.contains_output_by_type_id(reasoning_id));
         assert!(!ctx.contains_output_by_type_id(counter_id));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Optional ResMut tests
-    // ─────────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn optional_res_mut_returns_none() {
-        let ctx = SystemContext::new();
-
-        let result = Option::<ResMut<Counter>>::fetch(&ctx).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn optional_res_mut_returns_some() {
-        let ctx = SystemContext::new().with(Counter { value: 42 });
-
-        let result = Option::<ResMut<Counter>>::fetch(&ctx).unwrap();
-        assert!(result.is_some());
-
-        let mut counter = result.unwrap();
-        counter.value += 10;
-        drop(counter);
-
-        // Verify mutation took effect
-        let res = Res::<Counter>::fetch(&ctx).unwrap();
-        assert_eq!(res.value, 52);
-    }
-
-    #[test]
-    fn optional_res_mut_borrow_conflict() {
-        let ctx = SystemContext::new().with(Counter { value: 42 });
-
-        // Hold an immutable borrow
-        let _res = Res::<Counter>::fetch(&ctx).unwrap();
-
-        // Optional ResMut should return error (not None) on borrow conflict
-        let result = Option::<ResMut<Counter>>::fetch(&ctx);
-        assert!(matches!(result, Err(ParamError::BorrowConflict(_))));
     }
 
     // ─────────────────────────────────────────────────────────────────────

@@ -196,7 +196,8 @@ pub fn build_tool_config(
 
 /// Converts a Polaris tool definition to a Bedrock tool specification.
 fn convert_tool_spec(tool: &polaris_llm::ToolDefinition) -> Result<bedrock::Tool, GenerationError> {
-    let input_schema = json_to_document(&tool.parameters);
+    let normalized = normalize_schema_for_strict_mode(tool.parameters.clone());
+    let input_schema = json_to_document(&normalized);
 
     let spec = bedrock::ToolSpecification::builder()
         .name(&tool.name)

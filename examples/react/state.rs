@@ -1,6 +1,6 @@
 //! Agent loop state.
 
-use polaris_system::resource::LocalResource;
+use polaris::system::resource::LocalResource;
 
 /// Tracks whether the agent loop should continue.
 #[derive(Debug, Clone, Copy, Default)]

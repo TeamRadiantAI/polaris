@@ -1,9 +1,8 @@
 //! Anthropic provider plugin.
 
 use super::provider::AnthropicProvider;
-use polaris_models::ModelRegistry;
-use polaris_models::ModelsPlugin;
-use polaris_system::plugin::{Plugin, PluginId};
+use polaris_models::{ModelRegistry, ModelsPlugin};
+use polaris_system::plugin::{Plugin, PluginId, Version};
 use polaris_system::server::Server;
 use std::sync::Arc;
 
@@ -32,6 +31,9 @@ impl AnthropicPlugin {
 }
 
 impl Plugin for AnthropicPlugin {
+    const ID: &'static str = "polaris::provider::anthropic";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn dependencies(&self) -> Vec<PluginId> {
         vec![PluginId::of::<ModelsPlugin>()]
     }

@@ -42,6 +42,10 @@
 //!     .run();
 //! ```
 
+// Self-reference to ensure `#[system]` macro-generated code can use `polaris_system::` paths
+// within this crate.
+extern crate self as polaris_system;
+
 /// API trait for capability registration.
 pub mod api;
 

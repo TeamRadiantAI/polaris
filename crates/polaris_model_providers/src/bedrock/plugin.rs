@@ -4,7 +4,7 @@ use super::provider::BedrockProvider;
 use aws_sdk_bedrockruntime::Client;
 use polaris_models::ModelRegistry;
 use polaris_models::ModelsPlugin;
-use polaris_system::plugin::{Plugin, PluginId};
+use polaris_system::plugin::{Plugin, PluginId, Version};
 use polaris_system::server::Server;
 use std::sync::Arc;
 
@@ -50,6 +50,9 @@ impl Default for BedrockPlugin {
 }
 
 impl Plugin for BedrockPlugin {
+    const ID: &'static str = "polaris::provider::bedrock";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn dependencies(&self) -> Vec<PluginId> {
         vec![PluginId::of::<ModelsPlugin>()]
     }

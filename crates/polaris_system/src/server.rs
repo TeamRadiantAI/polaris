@@ -55,7 +55,7 @@
 
 use crate::api::API;
 use crate::param::SystemContext;
-use crate::plugin::{Plugin, PluginId, Plugins, ScheduleId};
+use crate::plugin::{DynPlugin, Plugin, PluginId, Plugins, ScheduleId};
 use crate::resource::{
     GlobalResource, LocalResource, Resource, ResourceRef, ResourceRefMut, Resources,
 };
@@ -158,14 +158,10 @@ struct PluginEntry {
     /// The plugin's unique identifier.
     ///
     /// Used for dependency resolution and duplicate detection.
-    #[expect(dead_code, reason = "Stored for future use in dependency graphs")]
     id: PluginId,
 
     /// The plugin instance.
-    plugin: Box<dyn Plugin>,
-
-    /// The plugin's name (cached for error messages).
-    name: String,
+    plugin: Box<dyn DynPlugin>,
 }
 
 impl Default for Server {
@@ -226,10 +222,9 @@ impl Server {
     ///
     /// # Arguments
     ///
-    /// * `id` - The plugin's unique identifier (captured before boxing)
     /// * `plugin` - The boxed plugin instance
-    pub(crate) fn add_plugin_boxed(&mut self, id: PluginId, plugin: Box<dyn Plugin>) {
-        let name = plugin.name().to_string();
+    pub(crate) fn add_plugin_boxed(&mut self, plugin: Box<dyn DynPlugin>) {
+        let id = plugin.id();
 
         // For unique plugins, check if already added
         if plugin.is_unique() && self.plugin_ids.contains(&id) {
@@ -237,14 +232,14 @@ impl Server {
                 "Plugin '{}' is unique and was already added.\n\
                  If you intended to add this plugin multiple times, \
                  set `is_unique()` to return `false`.",
-                name
+                id
             );
         }
 
         // Track this plugin ID
-        self.plugin_ids.insert(id);
+        self.plugin_ids.insert(id.clone());
 
-        let entry = PluginEntry { id, plugin, name };
+        let entry = PluginEntry { id, plugin };
 
         // If we're in the build phase, the plugin is built immediately
         if self.build_state == BuildState::Building {
@@ -260,11 +255,7 @@ impl Server {
     /// Returns true if a plugin of the given type has been added.
     #[must_use]
     pub fn has_plugin<P: Plugin>(&self) -> bool {
-        let name = core::any::type_name::<P>();
-        self.pending_plugins
-            .iter()
-            .chain(self.built_plugins.iter())
-            .any(|p| p.name == name)
+        self.plugin_ids.contains(&PluginId::of::<P>())
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -582,7 +573,7 @@ impl Server {
         let indices: Vec<usize> = plugin_indices.clone();
 
         for idx in indices {
-            let plugin_ptr = &self.built_plugins[idx].plugin as *const Box<dyn Plugin>;
+            let plugin_ptr = &self.built_plugins[idx].plugin as *const Box<dyn DynPlugin>;
             // SAFETY: built_plugins cannot be modified during this loop:
             // - It's a private field, inaccessible to plugin code
             // - add_plugins() during update goes to pending_plugins (build_state is Built)
@@ -639,7 +630,7 @@ impl Server {
         for i in 0..self.built_plugins.len() {
             // SAFETY: We're using index-based access to avoid borrow conflicts
             // The plugin is borrowed immutably, and we pass &mut self to ready()
-            let plugin_ptr = &self.built_plugins[i].plugin as *const Box<dyn Plugin>;
+            let plugin_ptr = &self.built_plugins[i].plugin as *const Box<dyn DynPlugin>;
             // SAFETY: We don't modify built_plugins during this loop, and the
             // pointer remains valid. The plugin's ready() may add resources but
             // shouldn't modify built_plugins.
@@ -720,7 +711,7 @@ impl Server {
     pub fn cleanup(&mut self) {
         // Cleanup in reverse order (dependents before dependencies)
         for i in (0..self.built_plugins.len()).rev() {
-            let plugin_ptr = &self.built_plugins[i].plugin as *const Box<dyn Plugin>;
+            let plugin_ptr = &self.built_plugins[i].plugin as *const Box<dyn DynPlugin>;
             // SAFETY: Same as ready() - we don't modify built_plugins during cleanup
             unsafe {
                 (*plugin_ptr).cleanup(self);
@@ -745,10 +736,10 @@ impl Server {
             return Vec::new();
         }
 
-        // Build a map of plugin name -> index for dependency lookup
-        let mut name_to_index: HashMap<String, usize> = HashMap::new();
+        // Build a map of plugin id -> index for dependency lookup
+        let mut id_to_index: HashMap<PluginId, usize> = HashMap::new();
         for (i, entry) in self.pending_plugins.iter().enumerate() {
-            name_to_index.insert(entry.name.clone(), i);
+            id_to_index.insert(entry.id.clone(), i);
         }
 
         // Build adjacency list and compute in-degrees
@@ -758,20 +749,18 @@ impl Server {
 
         for (i, entry) in self.pending_plugins.iter().enumerate() {
             for dep_id in entry.plugin.dependencies() {
-                let dep_name = dep_id.type_name();
-
                 // Find the dependency in pending plugins
-                if let Some(&dep_idx) = name_to_index.get(dep_name) {
+                if let Some(&dep_idx) = id_to_index.get(&dep_id) {
                     // dep_idx must be built before i
                     dependents[dep_idx].push(i);
                     in_degree[i] += 1;
                 } else {
                     // Check if already built
-                    if !self.built_plugins.iter().any(|p| p.name == dep_name) {
+                    if !self.built_plugins.iter().any(|p| p.id == dep_id) {
                         panic!(
                             "Plugin '{}' requires '{}' which was not added.\n\
                              Add {} before {}, or use a plugin group that includes it.",
-                            entry.name, dep_name, dep_name, entry.name
+                            entry.id, dep_id, dep_id, entry.id
                         );
                     }
                     // Dependency already built, no need to track
@@ -803,11 +792,11 @@ impl Server {
         // Check for cycle
         if sorted_indices.len() != n {
             // Find plugins involved in cycle
-            let in_cycle: Vec<&str> = in_degree
+            let in_cycle: Vec<String> = in_degree
                 .iter()
                 .enumerate()
                 .filter(|(_, deg)| **deg > 0)
-                .map(|(i, _)| self.pending_plugins[i].name.as_str())
+                .map(|(i, _)| self.pending_plugins[i].id.to_string())
                 .collect();
 
             panic!(

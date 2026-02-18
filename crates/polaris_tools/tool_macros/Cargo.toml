@@ -1,0 +1,17 @@
+[package]
+name = "tool_macros"
+version = "0.0.1"
+description = "Procedural macros for Polaris tool framework"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+proc-macro-crate = "3"

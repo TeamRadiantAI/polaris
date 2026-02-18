@@ -1,6 +1,6 @@
 //! Agent configuration.
 
-use polaris_system::resource::LocalResource;
+use polaris::system::resource::LocalResource;
 use std::path::PathBuf;
 
 /// Configuration for the `ReAct` agent.

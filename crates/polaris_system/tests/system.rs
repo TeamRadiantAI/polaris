@@ -3,7 +3,7 @@
 //! These tests cover basic server functionality, plugin lifecycle, resource management, and API interactions.
 //! These tests have been moved directly from the `polaris_system/src/server.rs` file.
 
-use polaris_system::plugin::{Plugin, PluginGroup};
+use polaris_system::plugin::{Plugin, PluginGroup, PluginId, Version};
 use polaris_system::prelude::*;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -26,6 +26,8 @@ struct AnotherResource {
 
 struct PluginA;
 impl Plugin for PluginA {
+    const ID: &'static str = "test::plugin_a";
+    const VERSION: Version = Version::new(0, 0, 1);
     fn build(&self, server: &mut Server) {
         server.insert_resource(TestResource { value: 1 });
     }
@@ -33,6 +35,8 @@ impl Plugin for PluginA {
 
 struct PluginB;
 impl Plugin for PluginB {
+    const ID: &'static str = "test::plugin_b";
+    const VERSION: Version = Version::new(0, 0, 1);
     fn build(&self, server: &mut Server) {
         // Modify the resource set by PluginA
         if let Some(mut res) = server.get_resource_mut::<TestResource>() {
@@ -47,6 +51,8 @@ impl Plugin for PluginB {
 
 struct PluginC;
 impl Plugin for PluginC {
+    const ID: &'static str = "test::plugin_c";
+    const VERSION: Version = Version::new(0, 0, 1);
     fn build(&self, server: &mut Server) {
         if let Some(mut res) = server.get_resource_mut::<TestResource>() {
             res.value *= 2;
@@ -71,6 +77,8 @@ impl Default for ReadyPlugin {
 }
 
 impl Plugin for ReadyPlugin {
+    const ID: &'static str = "test::ready";
+    const VERSION: Version = Version::new(0, 0, 1);
     fn build(&self, _server: &mut Server) {}
 
     fn ready(&self, server: &mut Server) {
@@ -84,6 +92,8 @@ impl Plugin for ReadyPlugin {
 
 struct CleanupPlugin;
 impl Plugin for CleanupPlugin {
+    const ID: &'static str = "test::cleanup";
+    const VERSION: Version = Version::new(0, 0, 1);
     fn build(&self, server: &mut Server) {
         server.insert_resource(TestResource { value: 100 });
     }
@@ -240,6 +250,8 @@ fn circular_dependency_panics() {
     // Create plugins with circular dependency
     struct CycleA;
     impl Plugin for CycleA {
+        const ID: &'static str = "test::cycle_a";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
         fn dependencies(&self) -> Vec<PluginId> {
             vec![PluginId::of::<CycleB>()]
@@ -248,6 +260,8 @@ fn circular_dependency_panics() {
 
     struct CycleB;
     impl Plugin for CycleB {
+        const ID: &'static str = "test::cycle_b";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
         fn dependencies(&self) -> Vec<PluginId> {
             vec![PluginId::of::<CycleA>()]
@@ -273,6 +287,8 @@ fn double_finish_panics() {
 fn sub_plugin_added_during_build() {
     struct ParentPlugin;
     impl Plugin for ParentPlugin {
+        const ID: &'static str = "test::parent";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, server: &mut Server) {
             // Add a sub-plugin during build
             server.add_plugins(PluginA);
@@ -322,6 +338,8 @@ fn cleanup_in_reverse_order() {
         my_order: Arc<AtomicUsize>,
     }
     impl Plugin for OrderedCleanupA {
+        const ID: &'static str = "test::ordered_cleanup_a";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
         fn cleanup(&self, _server: &mut Server) {
             let n = self.order.fetch_add(1, Ordering::SeqCst);
@@ -334,6 +352,8 @@ fn cleanup_in_reverse_order() {
         my_order: Arc<AtomicUsize>,
     }
     impl Plugin for OrderedCleanupB {
+        const ID: &'static str = "test::ordered_cleanup_b";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
         fn cleanup(&self, _server: &mut Server) {
             let n = self.order.fetch_add(1, Ordering::SeqCst);
@@ -613,6 +633,8 @@ fn plugin_registers_for_schedule_gets_ticked() {
     }
 
     impl Plugin for TickCountingPlugin {
+        const ID: &'static str = "test::tick_counting";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -651,6 +673,8 @@ fn plugin_not_registered_for_schedule_not_ticked() {
     }
 
     impl Plugin for SelectivePlugin {
+        const ID: &'static str = "test::selective";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -693,6 +717,8 @@ fn multiple_plugins_same_schedule_all_ticked_in_order() {
     }
 
     impl Plugin for FirstPlugin {
+        const ID: &'static str = "test::first";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -711,6 +737,8 @@ fn multiple_plugins_same_schedule_all_ticked_in_order() {
     }
 
     impl Plugin for SecondPlugin {
+        const ID: &'static str = "test::second";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -760,6 +788,8 @@ fn plugin_multiple_schedules() {
     }
 
     impl Plugin for MultiSchedulePlugin {
+        const ID: &'static str = "test::multi_schedule";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -818,6 +848,8 @@ fn schedule_passed_to_update_matches_triggered() {
     }
 
     impl Plugin for ScheduleCheckPlugin {
+        const ID: &'static str = "test::schedule_check";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -933,6 +965,8 @@ fn multiple_api_types() {
 fn plugin_inserts_api_in_build() {
     struct APIProviderPlugin;
     impl Plugin for APIProviderPlugin {
+        const ID: &'static str = "test::api_provider";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, server: &mut Server) {
             server.insert_api(TestAPI {
                 name: "from-plugin".into(),
@@ -957,6 +991,8 @@ fn plugin_accesses_api_in_ready() {
 
     struct APIProviderPlugin;
     impl Plugin for APIProviderPlugin {
+        const ID: &'static str = "test::api_provider_2";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, server: &mut Server) {
             server.insert_api(TestAPI {
                 name: "provided".into(),
@@ -968,6 +1004,8 @@ fn plugin_accesses_api_in_ready() {
         accessed: Arc<AtomicBool>,
     }
     impl Plugin for APIConsumerPlugin {
+        const ID: &'static str = "test::api_consumer";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn ready(&self, server: &mut Server) {
@@ -1163,6 +1201,8 @@ fn tick_schedule_uses_schedule_id_directly() {
     }
 
     impl Plugin for ScheduleIdPlugin {
+        const ID: &'static str = "test::schedule_id";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -1199,6 +1239,8 @@ fn update_receives_correct_schedule_id() {
     }
 
     impl Plugin for ScheduleTrackingPlugin {
+        const ID: &'static str = "test::schedule_tracking";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -1242,6 +1284,8 @@ fn plugins_with_no_tick_schedules_never_updated() {
     }
 
     impl Plugin for NoSchedulePlugin {
+        const ID: &'static str = "test::no_schedule";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         // Default tick_schedules() returns empty vec

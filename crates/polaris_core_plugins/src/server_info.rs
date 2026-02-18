@@ -30,7 +30,7 @@
 //! assert!(!info.version.is_empty());
 //! ```
 
-use polaris_system::plugin::Plugin;
+use polaris_system::plugin::{Plugin, Version};
 use polaris_system::resource::GlobalResource;
 use polaris_system::server::Server;
 
@@ -125,6 +125,9 @@ impl Default for ServerInfo {
 pub struct ServerInfoPlugin;
 
 impl Plugin for ServerInfoPlugin {
+    const ID: &'static str = "polaris::server_info";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn build(&self, server: &mut Server) {
         server.insert_global(ServerInfo::default());
     }
@@ -148,12 +151,5 @@ mod tests {
 
         let ctx = server.create_context();
         assert!(ctx.contains_resource::<ServerInfo>());
-    }
-
-    #[test]
-    fn server_info_plugin_name() {
-        let plugin = ServerInfoPlugin;
-        // Uses default type_name implementation
-        assert!(plugin.name().contains("ServerInfoPlugin"));
     }
 }
