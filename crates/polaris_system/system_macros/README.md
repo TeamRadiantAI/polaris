@@ -11,8 +11,7 @@ This crate provides the `#[system]` attribute macro that transforms async functi
 When defining systems with lifetime-parameterized parameters like `Res<'_, T>`, Rust's type system cannot express the relationship between input lifetimes and async return types:
 
 ```rust
-// This doesn't work due to Rust's E0582 error:
-// "lifetime 'w in return type doesn't appear in input types"
+// Fails with E0582: "lifetime 'w in return type doesn't appear in input types"
 for<'w> F: Fn(Res<'w, T>) -> BoxFuture<'w, O>
 ```
 
@@ -56,41 +55,6 @@ fn read_counter() -> ReadCounterSystem {
 }
 ```
 
-## Usage
-
-```rust
-use polaris_system::param::{Res, ResMut, Out};
-use polaris_system::system; // Macro is re-exported from polaris_system for convenience
-
-// Single parameter
-#[system]
-async fn read_config(config: Res< Config>) -> ConfigData {
-    ConfigData::from(&*config)
-}
-
-// Multiple parameters
-#[system]
-async fn process(
-    input: Res<Input>,
-    config: Res<Config>,
-) -> ProcessedOutput {
-    ProcessedOutput::new(&input, &config)
-}
-
-// Mutable resource
-#[system]
-async fn increment(mut counter: ResMut<Counter>) -> i32 {
-    counter.value += 1;
-    counter.value
-}
-
-// Reading previous output
-#[system]
-async fn transform(prev: Out<PreviousResult>) -> NextResult {
-    NextResult::from(&*prev)
-}
-```
-
 ## Generated Code
 
 For a function `foo_bar`, the macro generates:
@@ -105,7 +69,7 @@ For a function `foo_bar`, the macro generates:
 
 - Functions must be `async`
 - Parameters must be simple identifiers (no patterns)
-- Currently designed for use within `polaris_system` crate (uses `crate::` paths)
+- Currently designed for use within the `polaris_system` crate (uses `crate::` paths)
 
 ## License
 

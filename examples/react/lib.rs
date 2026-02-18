@@ -30,18 +30,19 @@ pub use config::AgentConfig;
 pub use context::ContextManager;
 pub use state::ReactState;
 
-use polaris_agent::Agent;
-use polaris_graph::Graph;
-use polaris_models::ModelRegistry;
-use polaris_models::llm::{
+use polaris::agent::Agent;
+use polaris::graph::Graph;
+use polaris::models;
+use polaris::models::ModelRegistry;
+use polaris::models::llm::{
     AssistantBlock, GenerationRequest, Message, ToolChoice, ToolFunction, ToolResultContent,
 };
-use polaris_system::param::{Out, Res, ResMut};
-use polaris_system::system;
+use polaris::system::param::{Out, Res, ResMut};
+use polaris::system::system;
+use polaris::tools::ToolRegistry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 const SYSTEM_PROMPT: &str = "You are a helpful ReAct agent. Think step by step.";
 
@@ -69,7 +70,7 @@ pub struct ToolCall {
     /// Name of the tool.
     pub name: String,
     /// Arguments for the tool.
-    pub args: HashMap<String, Value>,
+    pub args: Value,
 }
 
 /// Result of tool execution.
@@ -95,16 +96,18 @@ struct LlmReasoningOutput {
 /// Decide whether to use a tool or respond.
 #[system]
 async fn reason(
-    context: ResMut<ContextManager>,
+    context: Res<ContextManager>,
     config: Res<AgentConfig>,
     registry: Res<ModelRegistry>,
+    tool_registry: Res<ToolRegistry>,
 ) -> ReasoningResult {
     let model_id = &config.model_id;
     let messages = context.messages.clone();
 
     let llm = registry.llm(model_id).expect("model not found");
 
-    let tools_text = tools::get_tool_definitions()
+    let tools_text = tool_registry
+        .definitions()
         .iter()
         .map(|t| format!("- {}: {}", t.name, t.description))
         .collect::<Vec<_>>()
@@ -121,17 +124,22 @@ Based on the conversation, decide what to do next.
 - If you have enough information to answer, choose \"respond\"."
     );
 
-    // Build request with conversation history
-    let gen_request =
+    // Build request with conversation history.
+    let mut gen_request =
         GenerationRequest::with_system(system, "What should I do next?").history(messages);
+
+    // Bedrock requires toolConfig when history contains toolUse/toolResult blocks.
+    if context.has_tool_blocks() {
+        gen_request = gen_request.tools(tool_registry.definitions());
+    }
 
     match llm
         .generate_structured::<LlmReasoningOutput>(gen_request)
         .await
     {
         Ok(output) => {
-            tracing::info!("\n[Reasoning] {}", output.thought);
-            tracing::info!("[Decision] {}\n", output.action);
+            println!("\n[Reasoning] {}", output.thought);
+            println!("[Decision] {}\n", output.action);
             ReasoningResult {
                 action: if output.action == "use_tool" {
                     Action::UseTool
@@ -141,7 +149,7 @@ Based on the conversation, decide what to do next.
             }
         }
         Err(err) => {
-            tracing::error!("LLM error: {err}");
+            eprintln!("LLM error: {err}");
             ReasoningResult {
                 action: Action::Respond,
             }
@@ -155,6 +163,7 @@ async fn select_tool(
     mut context: ResMut<ContextManager>,
     config: Res<AgentConfig>,
     registry: Res<ModelRegistry>,
+    tool_registry: Res<ToolRegistry>,
 ) -> ToolCall {
     let model_id = &config.model_id;
     let messages = context.messages.clone();
@@ -163,7 +172,7 @@ async fn select_tool(
 
     let gen_request = GenerationRequest::with_system(SYSTEM_PROMPT, "Select a tool to use.")
         .history(messages)
-        .tools(tools::get_tool_definitions())
+        .tools(tool_registry.definitions())
         .tool_choice(ToolChoice::Required);
 
     let tool_call = match llm.generate(gen_request).await {
@@ -175,17 +184,16 @@ async fn select_tool(
             }
         }),
         Err(err) => {
-            tracing::error!("LLM error: {err}");
+            eprintln!("LLM error: {err}");
             None
         }
     };
 
     match tool_call {
         Some(call) => {
-            tracing::info!(
+            println!(
                 "[Tool Call] {}({})",
-                call.function.name,
-                call.function.arguments
+                call.function.name, call.function.arguments
             );
 
             // Add assistant message with tool call to history
@@ -194,19 +202,17 @@ async fn select_tool(
                 content: vec![AssistantBlock::ToolCall(call.clone())],
             });
 
-            let args = serde_json::from_value(call.function.arguments.clone()).unwrap_or_default();
-
             ToolCall {
                 id: call.id,
                 name: call.function.name,
-                args,
+                args: call.function.arguments.clone(),
             }
         }
         None => {
-            tracing::info!("[Tool Call] list_files({{\"path\": \".\"}}) (fallback)");
+            println!("[Tool Call] list_files({{\"path\": \".\"}}) (fallback)");
 
             // Create fallback tool call and add to history
-            let fallback = polaris_models::llm::ToolCall {
+            let fallback = models::llm::ToolCall {
                 id: "fallback".to_string(),
                 call_id: None,
                 function: ToolFunction {
@@ -222,12 +228,10 @@ async fn select_tool(
                 content: vec![AssistantBlock::ToolCall(fallback.clone())],
             });
 
-            let mut args = HashMap::new();
-            args.insert("path".to_string(), Value::String(".".to_string()));
             ToolCall {
                 id: fallback.id,
                 name: fallback.function.name,
-                args,
+                args: serde_json::json!({"path": "."}),
             }
         }
     }
@@ -235,11 +239,14 @@ async fn select_tool(
 
 /// Execute the selected tool.
 #[system]
-async fn execute_tool(call: Out<ToolCall>, config: Res<AgentConfig>) -> ToolResult {
-    let args = serde_json::to_value(&call.args).unwrap_or_default();
-    match tools::execute_tool(&call.name, &args, &config) {
-        Ok(output) => {
-            tracing::info!("[Tool Result] {}\n", output);
+async fn execute_tool(call: Out<ToolCall>, tool_registry: Res<ToolRegistry>) -> ToolResult {
+    match tool_registry.execute(&call.name, &call.args).await {
+        Ok(value) => {
+            let output = value
+                .as_str()
+                .map(String::from)
+                .unwrap_or_else(|| value.to_string());
+            println!("[Tool Result] {}\n", output);
             ToolResult {
                 id: call.id.clone(),
                 output,
@@ -247,10 +254,11 @@ async fn execute_tool(call: Out<ToolCall>, config: Res<AgentConfig>) -> ToolResu
             }
         }
         Err(err) => {
-            tracing::info!("[Tool Error] {}\n", err);
+            let output = err.to_string();
+            eprintln!("[Tool Error] {}\n", output);
             ToolResult {
                 id: call.id.clone(),
-                output: err,
+                output,
                 success: false,
             }
         }
@@ -281,27 +289,33 @@ async fn respond(
     mut context: ResMut<ContextManager>,
     config: Res<AgentConfig>,
     registry: Res<ModelRegistry>,
+    tool_registry: Res<ToolRegistry>,
 ) -> ReactState {
     let model_id = &config.model_id;
     let messages = context.messages.clone();
 
     let llm = registry.llm(model_id).expect("model not found");
 
-    let gen_request =
+    // Bedrock requires toolConfig when history contains toolUse/toolResult blocks.
+    let mut gen_request =
         GenerationRequest::with_system(SYSTEM_PROMPT, "Please provide your final response.")
             .history(messages);
+
+    if context.has_tool_blocks() {
+        gen_request = gen_request.tools(tool_registry.definitions());
+    }
 
     match llm.generate(gen_request).await {
         Ok(response) => {
             let text = response.text();
-            tracing::info!("[Response]\n{text}");
+            println!("[Response]\n{text}");
 
             // Add assistant response to history
             context.push(Message::assistant(&text));
         }
         Err(err) => {
-            tracing::error!("LLM error: {err}");
-            tracing::info!("I encountered an error processing your request.");
+            eprintln!("LLM error: {err}");
+            println!("I encountered an error processing your request.");
         }
     }
 

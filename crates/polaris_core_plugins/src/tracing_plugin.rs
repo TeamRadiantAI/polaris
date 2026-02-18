@@ -34,7 +34,7 @@
 //! ```
 
 use crate::ServerInfoPlugin;
-use polaris_system::plugin::{Plugin, PluginId};
+use polaris_system::plugin::{Plugin, PluginId, Version};
 use polaris_system::resource::GlobalResource;
 use polaris_system::server::Server;
 use tracing::Level;
@@ -241,6 +241,9 @@ impl TracingPlugin {
 }
 
 impl Plugin for TracingPlugin {
+    const ID: &'static str = "polaris::tracing";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn build(&self, server: &mut Server) {
         // Build the environment filter
         let env_filter = match &self.env_filter {
@@ -357,13 +360,6 @@ mod tests {
     fn tracing_plugin_with_span_events() {
         let plugin = TracingPlugin::new().with_span_events(true);
         assert!(plugin.span_events);
-    }
-
-    #[test]
-    fn tracing_plugin_name() {
-        let plugin = TracingPlugin::default();
-        // Uses default type_name implementation
-        assert!(plugin.name().contains("TracingPlugin"));
     }
 
     #[test]

@@ -1,10 +1,10 @@
 # polaris_models
 
-Model provider interface for Polaris. Provides a unified API for interacting with different LLM providers.
+Model provider interface and registry for Polaris. Provides a unified API for interacting with different LLM providers.
 
 ## Setup
 
-Add `ModelsPlugin` and at least one provider plugin:
+`ModelsPlugin` must be added alongside at least one provider plugin:
 
 ```rust
 use polaris_models::ModelsPlugin;
@@ -74,7 +74,7 @@ let response = llm.generate(request).await?;
 
 ## Creating a Provider Plugin
 
-Implement `LlmProvider` and register it in a plugin:
+Custom providers implement the `LlmProvider` trait and register with the `ModelRegistry` during the plugin build phase:
 
 ```rust
 use polaris_models::llm::{LlmProvider, GenerationRequest, GenerationResponse, GenerationError};

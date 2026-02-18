@@ -12,7 +12,7 @@
 //! # Example
 //!
 //! ```
-//! use polaris_system::plugin::{Plugin, PluginId};
+//! use polaris_system::plugin::{Plugin, PluginId, Version};
 //! use polaris_system::server::Server;
 //!
 //! struct MyPlugin {
@@ -21,6 +21,8 @@
 //!
 //! # struct TracingPlugin;
 //! # impl Plugin for TracingPlugin {
+//! #     const ID: &'static str = "polaris::tracing";
+//! #     const VERSION: Version = Version::new(0, 0, 1);
 //! #     fn build(&self, _server: &mut Server) {}
 //! # }
 //!
@@ -29,6 +31,9 @@
 //! # }
 //!
 //! impl Plugin for MyPlugin {
+//!     const ID: &'static str = "polaris::my_plugin";
+//!     const VERSION: Version = Version::new(0, 0, 1);
+//!
 //!     fn build(&self, server: &mut Server) {
 //!         server.insert_resource(MyConfig {
 //!             value: self.config.clone(),
@@ -49,54 +54,96 @@
 mod schedule;
 
 use crate::server::Server;
-use core::any::TypeId;
 pub use schedule::{IntoScheduleIds, Schedule, ScheduleId};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Version
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Semantic version identifier.
+///
+/// # Example
+///
+/// ```
+/// use polaris_system::plugin::Version;
+///
+/// let v = Version::new(1, 2, 3);
+/// assert_eq!(v.to_string(), "1.2.3");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Version {
+    /// Breaking changes.
+    pub major: u64,
+    /// Backwards-compatible additions.
+    pub minor: u64,
+    /// Backwards-compatible bug fixes.
+    pub patch: u64,
+}
+
+impl Version {
+    /// Creates a new [Version].
+    #[must_use]
+    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
+}
+
+impl core::fmt::Display for Version {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PluginId
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Unique identifier for a plugin type.
+/// Stable and unique developer-provided identifier for a plugin.
 ///
-/// Used for dependency resolution and duplicate detection. Based on [`TypeId`],
-/// so each plugin type has exactly one `PluginId`.
+/// Used for dependency resolution and duplicate detection.
 ///
 /// # Example
 ///
-/// ```ignore
-/// fn dependencies(&self) -> Vec<PluginId> {
-///     vec![
-///         PluginId::of::<TracingPlugin>(),
-///         PluginId::of::<IOPlugin>(),
-///     ]
-/// }
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PluginId {
-    type_id: TypeId,
-    type_name: &'static str,
-}
+/// use polaris_system::plugin::PluginId;
+///
+/// let id = PluginId::new("polaris::server_info");
+/// assert_eq!(id.to_string(), "polaris::server_info");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PluginId(&'static str);
 
 impl PluginId {
-    /// Creates a `PluginId` for the given plugin type.
+    /// Creates a `PluginId` from a string identifier.
+    #[must_use]
+    pub fn new(id: &'static str) -> Self {
+        Self(id)
+    }
+
+    /// Returns the [`PluginId`] for a plugin type using its [`Plugin::ID`] constant.
+    ///
+    /// This is often used for type-safe dependency declarations.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// fn dependencies(&self) -> Vec<PluginId> {
+    ///     vec![PluginId::of::<TracingPlugin>()]
+    /// }
+    /// ```
     #[must_use]
     pub fn of<P: Plugin>() -> Self {
-        Self {
-            type_id: TypeId::of::<P>(),
-            type_name: core::any::type_name::<P>(),
-        }
+        Self::new(P::ID)
     }
+}
 
-    /// Returns the underlying `TypeId`.
-    #[must_use]
-    pub fn type_id(&self) -> TypeId {
-        self.type_id
-    }
-
-    /// Returns the type name for debugging.
-    #[must_use]
-    pub fn type_name(&self) -> &'static str {
-        self.type_name
+impl core::fmt::Display for PluginId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.0)
     }
 }
 
@@ -124,6 +171,8 @@ impl PluginId {
 /// pub struct PostAgentRun;
 ///
 /// impl Plugin for TracingPlugin {
+///     const ID: &'static str = "polaris::tracing";
+///     const VERSION: Version = Version::new(0, 0, 1);
 ///     fn build(&self, server: &mut Server) { /* ... */ }
 ///
 ///     fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -144,6 +193,9 @@ impl PluginId {
 /// }
 ///
 /// impl Plugin for MetricsPlugin {
+///     const ID: &'static str = "polaris::metrics";
+///     const VERSION: Version = Version::new(0, 1, 0);
+///
 ///     fn build(&self, server: &mut Server) {
 ///         server.insert_resource(MetricsCollector::new(self.collect_interval));
 ///     }
@@ -167,6 +219,12 @@ impl PluginId {
 /// }
 /// ```
 pub trait Plugin: Send + Sync + 'static {
+    /// Stable, unique identifier for this plugin type.
+    const ID: &'static str;
+
+    /// Semantic version of this plugin.
+    const VERSION: Version;
+
     /// Configures the server. Called once when the plugin is added.
     ///
     /// Use this to:
@@ -233,13 +291,6 @@ pub trait Plugin: Send + Sync + 'static {
         Vec::new()
     }
 
-    /// Returns the plugin's name for debugging and error messages.
-    ///
-    /// Default implementation returns the type name.
-    fn name(&self) -> &str {
-        core::any::type_name::<Self>()
-    }
-
     /// Declares plugins that must be added before this one.
     ///
     /// The server will panic if dependencies are not satisfied when `run()` is called.
@@ -269,6 +320,70 @@ pub trait Plugin: Send + Sync + 'static {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DynPlugin Trait
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dyn-compatible counterpart of [`Plugin`].
+///
+/// The [`Plugin`] trait has associated constants (`ID`, `VERSION`) which make it
+/// non-dyn-compatible. This trait mirrors the same methods but uses regular
+/// methods instead, making it safe to use as `Box<dyn DynPlugin>`.
+///
+/// A blanket impl implements [`DynPlugin`] for every [`Plugin`], so plugin authors
+/// only ever implement [`Plugin`].
+pub(crate) trait DynPlugin: Send + Sync + 'static {
+    /// Returns this plugin's [`PluginId`].
+    fn id(&self) -> PluginId;
+    /// Returns this plugin's [`Version`].
+    #[expect(dead_code, reason = "reserved for future use by server introspection")]
+    fn version(&self) -> Version;
+    /// See [`Plugin::build`].
+    fn build(&self, server: &mut Server);
+    /// See [`Plugin::ready`].
+    fn ready(&self, server: &mut Server);
+    /// See [`Plugin::update`].
+    fn update(&self, server: &mut Server, schedule: ScheduleId);
+    /// See [`Plugin::cleanup`].
+    fn cleanup(&self, server: &mut Server);
+    /// See [`Plugin::tick_schedules`].
+    fn tick_schedules(&self) -> Vec<ScheduleId>;
+    /// See [`Plugin::dependencies`].
+    fn dependencies(&self) -> Vec<PluginId>;
+    /// See [`Plugin::is_unique`].
+    fn is_unique(&self) -> bool;
+}
+
+impl<T: Plugin> DynPlugin for T {
+    fn id(&self) -> PluginId {
+        PluginId::new(T::ID)
+    }
+    fn version(&self) -> Version {
+        T::VERSION
+    }
+    fn build(&self, server: &mut Server) {
+        Plugin::build(self, server);
+    }
+    fn ready(&self, server: &mut Server) {
+        Plugin::ready(self, server);
+    }
+    fn update(&self, server: &mut Server, schedule: ScheduleId) {
+        Plugin::update(self, server, schedule);
+    }
+    fn cleanup(&self, server: &mut Server) {
+        Plugin::cleanup(self, server);
+    }
+    fn tick_schedules(&self) -> Vec<ScheduleId> {
+        Plugin::tick_schedules(self)
+    }
+    fn dependencies(&self) -> Vec<PluginId> {
+        Plugin::dependencies(self)
+    }
+    fn is_unique(&self) -> bool {
+        Plugin::is_unique(self)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Plugins Trait (for add_plugins polymorphism)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -287,9 +402,7 @@ pub trait Plugins {
 /// Single plugins implement `Plugins` directly.
 impl<P: Plugin> Plugins for P {
     fn add_to_server(self, server: &mut Server) {
-        // Capture PluginId while we still have the concrete type
-        let id = PluginId::of::<P>();
-        server.add_plugin_boxed(id, Box::new(self));
+        server.add_plugin_boxed(Box::new(self));
     }
 }
 
@@ -297,7 +410,7 @@ impl<P: Plugin> Plugins for P {
 impl Plugins for PluginGroupBuilder {
     fn add_to_server(self, server: &mut Server) {
         for boxed in self.plugins {
-            server.add_plugin_boxed(boxed.id, boxed.plugin);
+            server.add_plugin_boxed(boxed.plugin);
         }
     }
 }
@@ -352,14 +465,7 @@ pub(crate) struct BoxedPlugin {
     /// The plugin's unique identifier (captured before boxing).
     pub(crate) id: PluginId,
     /// The boxed plugin instance.
-    pub(crate) plugin: Box<dyn Plugin>,
-}
-
-impl BoxedPlugin {
-    /// Returns the plugin's name (delegating to the inner plugin).
-    pub(crate) fn name(&self) -> &str {
-        self.plugin.name()
-    }
+    pub(crate) plugin: Box<dyn DynPlugin>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -420,11 +526,11 @@ impl PluginGroupBuilder {
     /// - `Target`: The plugin to insert before
     #[must_use]
     pub fn add_before<P: Plugin, Target: Plugin>(mut self, plugin: P) -> Self {
-        let target_name = core::any::type_name::<Target>();
+        let target = PluginId::of::<Target>();
         let position = self
             .plugins
             .iter()
-            .position(|p| p.name() == target_name)
+            .position(|p| p.id == target)
             .unwrap_or(0);
         let id = PluginId::of::<P>();
         self.plugins.insert(
@@ -447,11 +553,11 @@ impl PluginGroupBuilder {
     /// - `Target`: The plugin to insert after
     #[must_use]
     pub fn add_after<P: Plugin, Target: Plugin>(mut self, plugin: P) -> Self {
-        let target_name = core::any::type_name::<Target>();
+        let target = PluginId::of::<Target>();
         let position = self
             .plugins
             .iter()
-            .position(|p| p.name() == target_name)
+            .position(|p| p.id == target)
             .map(|i| i + 1)
             .unwrap_or(self.plugins.len());
         let id = PluginId::of::<P>();
@@ -470,8 +576,8 @@ impl PluginGroupBuilder {
     /// If the plugin is not found, this is a no-op.
     #[must_use]
     pub fn disable<P: Plugin>(mut self) -> Self {
-        let target_name = core::any::type_name::<P>();
-        self.plugins.retain(|p| p.name() != target_name);
+        let target = PluginId::of::<P>();
+        self.plugins.retain(|p| p.id != target);
         self
     }
 
@@ -495,11 +601,15 @@ mod tests {
     // Test plugins
     struct PluginA;
     impl Plugin for PluginA {
+        const ID: &'static str = "test::plugin_a";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
     }
 
     struct PluginB;
     impl Plugin for PluginB {
+        const ID: &'static str = "test::plugin_b";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
         fn dependencies(&self) -> Vec<PluginId> {
             vec![PluginId::of::<PluginA>()]
@@ -508,6 +618,8 @@ mod tests {
 
     struct PluginC;
     impl Plugin for PluginC {
+        const ID: &'static str = "test::plugin_c";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
     }
 
@@ -522,39 +634,35 @@ mod tests {
     }
 
     #[test]
-    fn plugin_id_type_name() {
-        let id = PluginId::of::<PluginA>();
-        assert!(id.type_name().contains("PluginA"));
+    fn plugin_id_display() {
+        let id = PluginId::new("polaris::server_info");
+        assert_eq!(id.to_string(), "polaris::server_info");
     }
 
     #[test]
-    fn plugin_default_name() {
-        let plugin = PluginA;
-        assert!(plugin.name().contains("PluginA"));
+    fn plugin_id_and_version() {
+        assert_eq!(PluginId::of::<PluginA>(), PluginId::new("test::plugin_a"));
+        assert_eq!(PluginA::VERSION, Version::new(0, 0, 1));
     }
 
     #[test]
     fn plugin_default_is_unique() {
-        let plugin = PluginA;
-        assert!(plugin.is_unique());
+        assert!(Plugin::is_unique(&PluginA));
     }
 
     #[test]
     fn plugin_default_dependencies_empty() {
-        let plugin = PluginA;
-        assert!(plugin.dependencies().is_empty());
+        assert!(Plugin::dependencies(&PluginA).is_empty());
     }
 
     #[test]
     fn plugin_default_tick_schedules_empty() {
-        let plugin = PluginA;
-        assert!(plugin.tick_schedules().is_empty());
+        assert!(Plugin::tick_schedules(&PluginA).is_empty());
     }
 
     #[test]
     fn plugin_with_dependencies() {
-        let plugin = PluginB;
-        let deps = plugin.dependencies();
+        let deps = Plugin::dependencies(&PluginB);
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0], PluginId::of::<PluginA>());
     }
@@ -574,7 +682,7 @@ mod tests {
             .disable::<PluginA>();
 
         assert_eq!(builder.len(), 1);
-        assert!(builder.plugins[0].name().contains("PluginB"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginB>());
     }
 
     #[test]
@@ -586,9 +694,9 @@ mod tests {
 
         assert_eq!(builder.len(), 3);
         // Order: A, C, B
-        assert!(builder.plugins[0].name().contains("PluginA"));
-        assert!(builder.plugins[1].name().contains("PluginC"));
-        assert!(builder.plugins[2].name().contains("PluginB"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginA>());
+        assert!(builder.plugins[1].id == PluginId::of::<PluginC>());
+        assert!(builder.plugins[2].id == PluginId::of::<PluginB>());
     }
 
     #[test]
@@ -600,9 +708,9 @@ mod tests {
 
         assert_eq!(builder.len(), 3);
         // Order: A, C, B
-        assert!(builder.plugins[0].name().contains("PluginA"));
-        assert!(builder.plugins[1].name().contains("PluginC"));
-        assert!(builder.plugins[2].name().contains("PluginB"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginA>());
+        assert!(builder.plugins[1].id == PluginId::of::<PluginC>());
+        assert!(builder.plugins[2].id == PluginId::of::<PluginB>());
     }
 
     #[test]
@@ -614,8 +722,8 @@ mod tests {
 
         assert_eq!(builder.len(), 2);
         // C added at beginning since B not found
-        assert!(builder.plugins[0].name().contains("PluginC"));
-        assert!(builder.plugins[1].name().contains("PluginA"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginC>());
+        assert!(builder.plugins[1].id == PluginId::of::<PluginA>());
     }
 
     #[test]
@@ -627,8 +735,8 @@ mod tests {
 
         assert_eq!(builder.len(), 2);
         // C added at end since B not found
-        assert!(builder.plugins[0].name().contains("PluginA"));
-        assert!(builder.plugins[1].name().contains("PluginC"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginA>());
+        assert!(builder.plugins[1].id == PluginId::of::<PluginC>());
     }
 
     // Test PluginGroup trait
@@ -644,18 +752,6 @@ mod tests {
     fn plugin_group_build() {
         let builder = TestPluginGroup.build();
         assert_eq!(builder.len(), 2);
-    }
-
-    #[test]
-    fn plugin_id_type_id_method() {
-        let id = PluginId::of::<PluginA>();
-        assert_eq!(id.type_id(), TypeId::of::<PluginA>());
-
-        let id_b = PluginId::of::<PluginB>();
-        assert_eq!(id_b.type_id(), TypeId::of::<PluginB>());
-
-        // Different plugin types should have different TypeIds
-        assert_ne!(id.type_id(), id_b.type_id());
     }
 
     #[test]
@@ -683,13 +779,15 @@ mod tests {
 
         // Should still have PluginA
         assert_eq!(builder.len(), 1);
-        assert!(builder.plugins[0].name().contains("PluginA"));
+        assert!(builder.plugins[0].id == PluginId::of::<PluginA>());
     }
 
     // Test non-unique plugin behavior
     struct NonUniquePlugin;
 
     impl Plugin for NonUniquePlugin {
+        const ID: &'static str = "test::non_unique";
+        const VERSION: Version = Version::new(0, 0, 1);
         fn build(&self, _server: &mut Server) {}
 
         fn is_unique(&self) -> bool {

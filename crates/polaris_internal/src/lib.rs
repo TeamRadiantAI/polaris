@@ -11,9 +11,51 @@ pub use polaris_graph;
 /// Layer 2: Agent pattern definition.
 pub use polaris_agent;
 
+/// Tool framework for LLM-callable functions.
+pub use polaris_tools;
+
+/// Layer 3: Model providers and model-related utilities.
+pub use polaris_model_providers;
+pub use polaris_models;
+
+/// Core infrastructure plugins (e.g., time, tracing).
+pub use polaris_core_plugins;
+
 /// Re-export all common types for easy access.
 pub mod prelude {
     pub use polaris_agent::{Agent, AgentExt};
     pub use polaris_graph::prelude::*;
     pub use polaris_system::prelude::*;
+    pub use polaris_tools::{Tool, ToolError, ToolRegistry, ToolsPlugin, Toolset};
+}
+
+/// Re-export all system-related types for easy access.
+pub mod system {
+    pub use polaris_system::*;
+}
+
+/// Re-export all graph-related types for easy access.
+pub mod graph {
+    pub use polaris_graph::*;
+}
+
+/// Re-export all agent-related types for easy access.
+pub mod agent {
+    pub use polaris_agent::*;
+}
+
+/// Re-export all model-related types for easy access.
+pub mod tools {
+    pub use polaris_tools::*;
+}
+
+/// Re-export all model-related types for easy access.
+pub mod models {
+    pub use polaris_model_providers::*;
+    pub use polaris_models::*;
+}
+
+/// Re-export all core plugin types for easy access.
+pub mod plugins {
+    pub use polaris_core_plugins::*;
 }

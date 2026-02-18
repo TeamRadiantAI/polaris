@@ -78,7 +78,6 @@ impl LocalResource for Memory {}
 | `Res<T>` | Read shared state | Immutable, concurrent |
 | `ResMut<T>` | Modify local state | Exclusive (requires `LocalResource`) |
 | `Out<T>` | Read previous system output | Immutable, concurrent |
-| `Option<Res<T>>` | Optional resource access | Same as inner type |
 
 ### The `#[system]` Macro
 
@@ -94,15 +93,12 @@ async fn my_system(
     mut state: ResMut<State>,
     prev: Out<PreviousResult>,
 ) -> MyOutput {
-    // Your async logic here
     MyOutput::new()
 }
 
 // Creates: MySystemSystem struct + my_system() factory function
 let system = my_system();
 ```
-
-This solves Rust's lifetime limitations with HRTB and async functions by generating the boilerplate `System` implementation.
 
 ### Zero-Parameter Systems
 
@@ -130,8 +126,6 @@ This crate follows ECS-inspired patterns from [Bevy](https://bevyengine.org/):
 Safety guarantees:
 - `ResMut<T>` requires `T: LocalResource` (compile-time)
 - Concurrent access conflicts detected at runtime via `RwLock`
-
-See [docs/philosophy.md](../../docs/philosophy.md) for detailed design rationale.
 
 ## License
 

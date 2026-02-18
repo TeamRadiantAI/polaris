@@ -1,7 +1,7 @@
 //! Provides the [`ModelRegistry`] global resource.
 
 use crate::registry::ModelRegistry;
-use polaris_system::plugin::Plugin;
+use polaris_system::plugin::{Plugin, Version};
 use polaris_system::server::Server;
 
 /// Plugin that provides the [`ModelRegistry`] for provider-agnostic model access.
@@ -34,6 +34,9 @@ use polaris_system::server::Server;
 pub struct ModelsPlugin;
 
 impl Plugin for ModelsPlugin {
+    const ID: &'static str = "polaris::models";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn build(&self, server: &mut Server) {
         server.insert_resource(ModelRegistry::new());
     }

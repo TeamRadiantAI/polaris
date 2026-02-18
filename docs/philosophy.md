@@ -2,50 +2,33 @@
 
 ## Why Polaris Exists
 
-We believe that building performant AI agents is a design problem, not a technical problem. The bottleneck in agent development is not compute, APIs, or infrastructure; it's discovering the right design, the right control flow, the right tool selection strategy, the right memory architecture, the right interaction protocol.
+We believe that building performant AI agents is a design problem. The bottleneck is not compute, APIs, or infrastructure. It is discovering how an agent should behave for a given use case, and being able to change that behavior quickly when it turns out to be wrong.
 
-Most agent frameworks ship with a fixed execution loop and a set of opinions about how agents should work. When a use case doesn't fit those opinions, developers end up fighting the framework. Polaris takes a different approach: it provides composable primitives and stays out of the way.
+Most agent frameworks ship with a fixed execution model and a set of opinions about how agents should work. This works when the use case aligns with that model. When it does not, the framework becomes the constraint.
 
-Finding the right design requires rapid experimentation: designing an agent, observing its behavior, adjusting the approach, and iterating. This principle governs every design decision in Polaris. If a feature does not enable faster iteration on agent design, it does not belong in the framework.
+Polaris provides composable primitives without prescribing how they should be assembled. There is no default execution loop. Agent behavior is constructed from small, replaceable parts, and the framework imposes no opinion on the result. Finding the right design requires rapid experimentation, and every decision in Polaris is evaluated against that principle. If a feature does not enable faster iteration on agent design, it does not belong in the framework.
 
 ## Core Architecture
 
-### ECS-Inspired Systems
+### ECS-Inspired State and Behavior
 
-In most agent frameworks, an agent is an object — it has methods, holds internal state, and controls its own behavior. This makes agents hard to test, hard to inspect, and hard to compose.
+Polaris separates behavior from state, borrowing from the [Entity Component System (ECS)](https://en.wikipedia.org/wiki/Entity_component_system) pattern used in game engines such as [Bevy](https://bevy.org). State lives in shared **resources** within a central registry, and behavior lives in **systems**, which are pure functions that declare what resources they need and are run by the framework.
 
-Polaris separates behavior from state, borrowing from the [Entity Component System (ECS)](https://en.wikipedia.org/wiki/Entity_component_system) pattern used in game engines like [Bevy](https://bevy.org). The idea is simple: state lives in shared **resources**, and behavior lives in **systems** — pure functions that declare what resources they need. The framework resolves those dependencies and runs the systems.
-
-This means:
-
-- **State is always visible.** Resources live in a central registry. There is nothing hidden inside an object.
-- **Behavior is always testable.** Systems are pure functions with explicit inputs. They can be tested like any other function.
-- **Composition is straightforward.** Adding behavior means adding another system. No inheritance, no method overrides.
-
-The `SystemParam` trait enables this by automatically resolving function parameters at runtime.
-
-For multi-agent scenarios, Polaris extends the single-world ECS model with hierarchical contexts. Each agent gets its own context with isolated state, while retaining access to shared global resources through a parent-child context chain. This allows multiple agents to run concurrently without interfering with one another.
+This separation keeps state inspectable, makes systems testable in isolation, and allows new behavior to be added by registration rather than inheritance. It also enables compile-time verification. Input and output types on systems enforce valid data flow, and resource access patterns are validated through the type system.
+For multi-agent scenarios, Polaris extends the single-world model with hierarchical contexts. Each agent receives its own context with isolated state while retaining access to shared global resources through a parent-child context chain.
 
 ### Graph-Based Execution
 
-Most frameworks express agent logic as imperative code — hardcoded loops, scattered conditionals, control flow buried across methods and callbacks. This makes behavior hard to see, hard to change, and hard to reason about.
+Agent logic in Polaris is expressed as a directed graph of async functions. **Nodes** represent units of work such as an LLM call, a tool invocation, or a decision point. **Edges** define control flow between them, whether sequential, conditional, parallel, or looping.
 
-In Polaris, an agent is a directed graph of async functions:
+The graph is the agent. Its full topology is inspectable, individual nodes can be swapped, and control flow can be restructured by rewiring edges. Connections are verified before execution begins, so structural errors surface early rather than mid-run.
 
-- **Nodes** are units of work: an LLM call, a tool invocation, a decision point.
-- **Edges** define control flow: sequential, conditional, parallel, or looping.
-- **Execution** traverses the graph, passing data from node to node.
+### Plugin Architecture
 
-This model makes agent behavior explicit and inspectable. It can be inspected, modified, and replaced — in whole or in part. Adding a step means adding a node. Changing the flow means changing an edge. Trying a different pattern means swapping the graph.
+The Polaris server is a plugin orchestrator. Every capability, including logging, tracing, I/O, tool execution, memory, and LLM providers, is delivered through plugins that are registered at startup.
 
-### Everything Is a Plugin
+This means that every component is replaceable, testable in isolation, and optional. Any implementation can be swapped with minimal conflicts. This makes it practical to experiment with alternatives, run different configurations in parallel, and package stable designs as reusable modules
 
-The server is a plugin orchestrator — nothing more. Every capability (logging, tracing, I/O, tool execution, memory, LLM providers) is delivered through plugins.
+---
 
-This means that every component is replaceable, testable in isolation, and optional. Any implementation can be swapped with minimal conflicts. This makes it straightforward to experiment with alternatives, run different configurations in parallel, and package proven designs as reusable modules.
-
-### Type Safety First
-
-Polaris prioritizes catching errors at compile time. Input/output types on systems enforce valid data flow, graph connections are verified before execution begins, and resource access patterns are validated through the type system.
-
-Runtime errors from type mismatches should be impossible in a well-typed Polaris program. This compile-time safety is crucial for building reliable agents that behave predictably.
+Each layer of this architecture serves the same end: reducing the distance between a design hypothesis and an observable result. Polaris does not prescribe how agents should be built. It provides the machinery for finding out.

@@ -1,7 +1,7 @@
 //! Conversation context management.
 
-use polaris_models::llm::Message;
-use polaris_system::resource::LocalResource;
+use polaris::models::llm::{AssistantBlock, Message, UserBlock};
+use polaris::system::resource::LocalResource;
 
 /// Manages conversation history for the agent.
 #[derive(Debug, Clone, Default)]
@@ -22,6 +22,18 @@ impl ContextManager {
     /// Adds a message to the history.
     pub fn push(&mut self, message: Message) {
         self.messages.push(message);
+    }
+
+    /// Returns `true` if any message contains tool call or tool result blocks.
+    pub fn has_tool_blocks(&self) -> bool {
+        self.messages.iter().any(|msg| match msg {
+            Message::User { content } => content
+                .iter()
+                .any(|b| matches!(b, UserBlock::ToolResult(_))),
+            Message::Assistant { content, .. } => content
+                .iter()
+                .any(|b| matches!(b, AssistantBlock::ToolCall(_))),
+        })
     }
 }
 

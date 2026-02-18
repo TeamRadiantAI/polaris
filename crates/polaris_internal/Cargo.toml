@@ -5,10 +5,18 @@ description = "An internal Polaris crate"
 edition = "2024"
 keywords = []
 
+[features]
+default = []
+bedrock = ["polaris_model_providers/bedrock"]
+
 [dependencies]
 polaris_system = { path = "../polaris_system" }
 polaris_graph = { path = "../polaris_graph" }
 polaris_agent = { path = "../polaris_agent" }
+polaris_tools = { path = "../polaris_tools" }
+polaris_model_providers = { path = "../polaris_model_providers" }
+polaris_models = { path = "../polaris_models" }
+polaris_core_plugins = { path = "../polaris_core_plugins" }
 
 [lints]
 workspace = true

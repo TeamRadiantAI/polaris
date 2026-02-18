@@ -36,7 +36,7 @@
 //! ```
 
 use crate::ServerInfoPlugin;
-use polaris_system::plugin::{Plugin, PluginId};
+use polaris_system::plugin::{Plugin, PluginId, Version};
 use polaris_system::resource::{GlobalResource, LocalResource};
 use polaris_system::server::Server;
 use std::sync::Arc;
@@ -347,6 +347,9 @@ impl TimePlugin {
 }
 
 impl Plugin for TimePlugin {
+    const ID: &'static str = "polaris::time";
+    const VERSION: Version = Version::new(0, 0, 1);
+
     fn build(&self, server: &mut Server) {
         // Global: Clock provider (mockable for testing)
         let clock = match &self.clock {
@@ -520,12 +523,5 @@ mod tests {
 
         // Advance mock time
         mock.advance(Duration::from_secs(60));
-    }
-
-    #[test]
-    fn time_plugin_name() {
-        let plugin = TimePlugin::default();
-        // Uses default type_name implementation
-        assert!(plugin.name().contains("TimePlugin"));
     }
 }

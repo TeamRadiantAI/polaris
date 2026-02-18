@@ -14,12 +14,15 @@
 //! react ./sandbox "List all files"
 //! ```
 
-use example::{AgentConfig, ContextManager, ReActAgent, ReactState};
-use polaris_agent::AgentExt;
-use polaris_graph::GraphExecutor;
-use polaris_model_providers::anthropic::AnthropicPlugin;
-use polaris_models::ModelsPlugin;
-use polaris_system::server::Server;
+use examples::tools::FileToolsPlugin;
+use examples::{AgentConfig, ContextManager, ReActAgent, ReactState};
+use polaris::{
+    agent::AgentExt,
+    graph::GraphExecutor,
+    models::{AnthropicPlugin, BedrockPlugin, ModelsPlugin},
+    system::server::Server,
+    tools::ToolsPlugin,
+};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -50,19 +53,24 @@ async fn main() {
         std::process::exit(1);
     });
 
+    let config = AgentConfig::new(
+        "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        working_dir,
+    );
+
     // Initialize server with plugins
     let mut server = Server::new();
     server.add_plugins(ModelsPlugin);
     server.add_plugins(AnthropicPlugin::from_env("ANTHROPIC_API_KEY"));
+    server.add_plugins(BedrockPlugin::from_env());
+    server.add_plugins(ToolsPlugin);
+    server.add_plugins(FileToolsPlugin::new(config.clone()));
     server.finish();
 
     // Create execution context
     let mut ctx = server
         .create_context()
-        .with(AgentConfig::new(
-            "anthropic/claude-sonnet-4-5-20250929",
-            working_dir,
-        ))
+        .with(config)
         .with(ContextManager::new(query))
         .with(ReactState::default());
 

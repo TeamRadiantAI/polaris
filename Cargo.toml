@@ -10,12 +10,16 @@ keywords = ["ai", "agents", "ecs", "async", "framework"]
 license = "Apache-2.0"
 repository = "https://github.com/TeamRadiantAI/polaris"
 rust-version = "1.93.0"
+autoexamples = false
 
 [workspace]
 resolver = "2"
 members = [
     # All of Polaris internal crates
     "crates/*",
+]
+exclude = [
+    "examples",
 ]
 
 [workspace.lints.clippy]
@@ -37,6 +41,9 @@ print_stderr = "warn"
 ptr_as_ptr = "warn"
 ptr_cast_constness = "warn"
 ref_as_ptr = "warn"
+
+# see: https://github.com/bevyengine/bevy/pull/15375#issuecomment-2366966219
+too_long_first_doc_paragraph = "allow"
 
 std_instead_of_core = "allow"
 std_instead_of_alloc = "allow"
@@ -84,6 +91,10 @@ missing_docs = "warn"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs_dep)'] }
 unsafe_op_in_unsafe_fn = "warn"
 unused_qualifications = "warn"
+
+[features]
+default = []
+bedrock = ["polaris_internal/bedrock"]
 
 [dependencies]
 polaris_internal = { path = "crates/polaris_internal", version = "0.0.1"}
