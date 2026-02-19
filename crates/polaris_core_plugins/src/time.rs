@@ -11,7 +11,7 @@
 //! use polaris_system::server::Server;
 //! use polaris_system::param::{Res, ResMut};
 //! use polaris_system::system;
-//! use polaris_core::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
+//! use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
 //!
 //! // A system that tracks execution time
 //! #[system]
@@ -54,7 +54,7 @@ use std::time::{Duration, Instant};
 ///
 /// ```no_run
 /// use std::time::Instant;
-/// use polaris_core::ClockProvider;
+/// use polaris_core_plugins::ClockProvider;
 ///
 /// /// A clock that always returns a fixed instant.
 /// struct FixedClock(Instant);
@@ -103,7 +103,7 @@ impl ClockProvider for SystemClock {
 /// use std::time::Instant;
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
-/// use polaris_core::Clock;
+/// use polaris_core_plugins::Clock;
 ///
 /// #[system]
 /// async fn measure_operation(clock: Res<Clock>) {
@@ -174,7 +174,7 @@ impl Default for Clock {
 /// ```ignore
 /// use polaris_system::param::ResMut;
 /// use polaris_system::system;
-/// use polaris_core::Stopwatch;
+/// use polaris_core_plugins::Stopwatch;
 ///
 /// #[system]
 /// async fn multi_step_operation(mut stopwatch: ResMut<Stopwatch>) {
@@ -268,7 +268,7 @@ impl Default for Stopwatch {
 /// use polaris_system::server::Server;
 /// use polaris_system::param::{Res, ResMut};
 /// use polaris_system::system;
-/// use polaris_core::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
+/// use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, Clock, Stopwatch};
 ///
 /// #[system]
 /// async fn timed_system(
@@ -295,7 +295,7 @@ impl Default for Stopwatch {
 /// use std::sync::Arc;
 /// use std::time::{Duration, Instant};
 /// use polaris_system::server::Server;
-/// use polaris_core::{ServerInfoPlugin, TimePlugin, Clock};
+/// use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, Clock};
 ///
 /// // Create a mock clock
 /// let mock = Arc::new(MockClock::new(Instant::now()));
@@ -335,7 +335,7 @@ impl TimePlugin {
     ///
     /// ```ignore
     /// use std::sync::Arc;
-    /// use polaris_core::{TimePlugin, MockClock};
+    /// use polaris_core_plugins::{TimePlugin, MockClock};
     ///
     /// let mock = Arc::new(MockClock::new(Instant::now()));
     /// let plugin = TimePlugin::with_clock(mock);
@@ -378,7 +378,7 @@ impl Plugin for TimePlugin {
 /// ```ignore
 /// use std::sync::Arc;
 /// use std::time::{Duration, Instant};
-/// use polaris_core::{TimePlugin, MockClock};
+/// use polaris_core_plugins::{TimePlugin, MockClock};
 ///
 /// let mock = Arc::new(MockClock::new(Instant::now()));
 /// let plugin = TimePlugin::with_clock(mock.clone());

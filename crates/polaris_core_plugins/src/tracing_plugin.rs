@@ -3,13 +3,22 @@
 //! Provides [`TracingPlugin`] which configures the `tracing` subscriber and
 //! exposes configuration as a resource.
 //!
+//! # Lifecycle
+//!
+//! - **`build()`** registers the [`TracingConfig`] resource so other plugins
+//!   can read the intended configuration during build.
+//! - **`ready()`** initializes the tracing subscriber. This deferred
+//!   initialization allows other plugins (or [`DefaultPlugins`](crate::DefaultPlugins)
+//!   configuration) to influence tracing settings before the subscriber is
+//!   installed.
+//!
 //! # Example
 //!
 //! ```ignore
 //! use polaris_system::server::Server;
 //! use polaris_system::param::Res;
 //! use polaris_system::system;
-//! use polaris_core::{ServerInfoPlugin, TracingPlugin, TracingConfig, TracingFormat};
+//! use polaris_core_plugins::{ServerInfoPlugin, TracingPlugin, TracingConfig, TracingFormat};
 //! use tracing::Level;
 //!
 //! #[system]
@@ -78,7 +87,7 @@ pub enum TracingFormat {
 /// ```ignore
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
-/// use polaris_core::TracingConfig;
+/// use polaris_core_plugins::TracingConfig;
 /// use tracing::Level;
 ///
 /// #[system]
@@ -129,7 +138,7 @@ impl GlobalResource for TracingConfig {}
 ///
 /// ```no_run
 /// use polaris_system::server::Server;
-/// use polaris_core::{ServerInfoPlugin, TracingPlugin, TracingFormat};
+/// use polaris_core_plugins::{ServerInfoPlugin, TracingPlugin, TracingFormat};
 /// use tracing::Level;
 ///
 /// let mut server = Server::new();
@@ -145,7 +154,7 @@ impl GlobalResource for TracingConfig {}
 /// # Configuration Options
 ///
 /// ```no_run
-/// use polaris_core::{TracingPlugin, TracingFormat};
+/// use polaris_core_plugins::{TracingPlugin, TracingFormat};
 /// use tracing::Level;
 ///
 /// // Development: Pretty colored output with debug level
@@ -166,7 +175,7 @@ impl GlobalResource for TracingConfig {}
 /// Use `with_env_filter` to set target-specific log levels:
 ///
 /// ```no_run
-/// use polaris_core::TracingPlugin;
+/// use polaris_core_plugins::TracingPlugin;
 ///
 /// TracingPlugin::default()
 ///     .with_env_filter("polaris=debug,hyper=warn,tower=info")
@@ -245,6 +254,17 @@ impl Plugin for TracingPlugin {
     const VERSION: Version = Version::new(0, 0, 1);
 
     fn build(&self, server: &mut Server) {
+        // Expose configuration as global resource.
+        // Subscriber initialization happens at ready() so that
+        // DefaultPlugins (or other configuration) can influence settings
+        // before the subscriber is installed.
+        server.insert_global(TracingConfig {
+            level: self.level,
+            format: self.format,
+        });
+    }
+
+    fn ready(&self, _server: &mut Server) {
         // Build the environment filter
         let env_filter = match &self.env_filter {
             Some(filter) => {
@@ -298,14 +318,6 @@ impl Plugin for TracingPlugin {
             }
         }
 
-        // Expose configuration as global resource
-        server.insert_global(TracingConfig {
-            level: self.level,
-            format: self.format,
-        });
-    }
-
-    fn ready(&self, _server: &mut Server) {
         tracing::info!(
             level = %self.level,
             format = ?self.format,

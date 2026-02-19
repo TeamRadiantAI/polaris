@@ -8,7 +8,7 @@
 //! use polaris_system::server::Server;
 //! use polaris_system::param::Res;
 //! use polaris_system::system;
-//! use polaris_core::{ServerInfoPlugin, ServerInfo};
+//! use polaris_core_plugins::{ServerInfoPlugin, ServerInfo};
 //!
 //! // Define a system that uses ServerInfo
 //! #[system]
@@ -49,7 +49,7 @@ use polaris_system::server::Server;
 /// ```ignore
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
-/// use polaris_core::ServerInfo;
+/// use polaris_core_plugins::ServerInfo;
 ///
 /// #[system]
 /// async fn check_environment(info: Res<ServerInfo>) {
@@ -104,7 +104,7 @@ impl Default for ServerInfo {
 /// use polaris_system::server::Server;
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
-/// use polaris_core::{ServerInfoPlugin, ServerInfo};
+/// use polaris_core_plugins::{ServerInfoPlugin, ServerInfo};
 ///
 /// // A system that adapts behavior based on build mode
 /// #[system]

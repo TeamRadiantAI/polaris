@@ -226,14 +226,9 @@ impl Server {
     pub(crate) fn add_plugin_boxed(&mut self, plugin: Box<dyn DynPlugin>) {
         let id = plugin.id();
 
-        // For unique plugins, check if already added
-        if plugin.is_unique() && self.plugin_ids.contains(&id) {
-            panic!(
-                "Plugin '{}' is unique and was already added.\n\
-                 If you intended to add this plugin multiple times, \
-                 set `is_unique()` to return `false`.",
-                id
-            );
+        // Reject duplicate plugins
+        if self.plugin_ids.contains(&id) {
+            panic!("Plugin '{}' was already added.", id);
         }
 
         // Track this plugin ID

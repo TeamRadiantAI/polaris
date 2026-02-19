@@ -5,21 +5,22 @@
 //! - [`ServerInfoPlugin`] - Server metadata and runtime information
 //! - [`TimePlugin`] - Time utilities with mockable clock for testing
 //! - [`TracingPlugin`] - Logging and observability via the `tracing` crate
+//! - [`IOPlugin`] - I/O abstractions for agent communication (opt-in)
 //! - [`DefaultPlugins`] - Convenient bundle of all infrastructure plugins
 //!
 //! # Feature Flags
 //!
-//! - `test-utils` - Enables [`MockClock`] for deterministic time testing
+//! - `test-utils` - Enables [`MockClock`] and [`MockIOProvider`] for testing
 //!
 //! # Example
 //!
 //! ```no_run
 //! use polaris_system::server::Server;
 //! use polaris_system::plugin::PluginGroup;
-//! use polaris_core::DefaultPlugins;
+//! use polaris_core_plugins::DefaultPlugins;
 //!
 //! Server::new()
-//!     .add_plugins(DefaultPlugins.build())
+//!     .add_plugins(DefaultPlugins::new().build())
 //!     .run();
 //! ```
 //!
@@ -29,7 +30,7 @@
 //!
 //! ```
 //! use polaris_system::server::Server;
-//! use polaris_core::{ServerInfoPlugin, TimePlugin, TracingPlugin};
+//! use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, TracingPlugin};
 //! use tracing::Level;
 //!
 //! Server::new()
@@ -47,16 +48,25 @@
 //! - **Layer 2** (`polaris_graph`, `polaris_agent`): Graph execution and agent patterns
 //! - **Layer 3** (plugins): Concrete agent implementations
 
+mod io;
 mod server_info;
 mod time;
 mod tracing_plugin;
 
 // Re-export plugins
+pub use io::IOPlugin;
 pub use server_info::ServerInfoPlugin;
 pub use time::{Clock, ClockProvider, Stopwatch, TimePlugin};
 pub use tracing_plugin::{TracingFormat, TracingPlugin};
 
+// Re-export IO types
+pub use io::{
+    IOContent, IOError, IOMessage, IOProvider, IOSource, InputBuffer, OutputBuffer, UserIO,
+};
+
 // Re-export test utilities
+#[cfg(any(test, feature = "test-utils"))]
+pub use io::MockIOProvider;
 #[cfg(any(test, feature = "test-utils"))]
 pub use time::MockClock;
 
@@ -65,6 +75,7 @@ pub use server_info::ServerInfo;
 pub use tracing_plugin::TracingConfig;
 
 use polaris_system::plugin::{PluginGroup, PluginGroupBuilder};
+use tracing::Level;
 
 /// Default plugins for most Polaris applications.
 ///
@@ -78,34 +89,125 @@ use polaris_system::plugin::{PluginGroup, PluginGroupBuilder};
 /// ```no_run
 /// use polaris_system::server::Server;
 /// use polaris_system::plugin::PluginGroup;
-/// use polaris_core::DefaultPlugins;
+/// use polaris_core_plugins::DefaultPlugins;
 ///
 /// Server::new()
-///     .add_plugins(DefaultPlugins.build())
+///     .add_plugins(DefaultPlugins::new().build())
 ///     .run();
 /// ```
 ///
 /// # Customization
 ///
-/// Use the builder pattern to customize:
+/// Configure tracing directly:
+///
+/// ```no_run
+/// use polaris_system::server::Server;
+/// use polaris_system::plugin::PluginGroup;
+/// use polaris_core_plugins::{DefaultPlugins, TracingFormat};
+/// use tracing::Level;
+///
+/// Server::new()
+///     .add_plugins(
+///         DefaultPlugins::new()
+///             .with_log_level(Level::DEBUG)
+///             .with_env_filter("polaris=debug,hyper=warn")
+///             .with_tracing_format(TracingFormat::Json)
+///             .build()
+///     )
+///     .run();
+/// ```
+///
+/// Or disable a plugin entirely:
 ///
 /// ```ignore
 /// Server::new()
 ///     .add_plugins(
-///         DefaultPlugins
+///         DefaultPlugins::new()
 ///             .build()
 ///             .disable::<TracingPlugin>()
 ///     )
 ///     .run();
 /// ```
-pub struct DefaultPlugins;
+pub struct DefaultPlugins {
+    /// Override for the tracing log level.
+    log_level: Option<Level>,
+    /// Override for the tracing output format.
+    tracing_format: Option<TracingFormat>,
+    /// Override for the tracing environment filter.
+    env_filter: Option<String>,
+    /// Override for span event logging.
+    span_events: Option<bool>,
+}
+
+impl DefaultPlugins {
+    /// Creates a new `DefaultPlugins` with default settings.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            log_level: None,
+            tracing_format: None,
+            env_filter: None,
+            span_events: None,
+        }
+    }
+
+    /// Sets the tracing log level.
+    #[must_use]
+    pub fn with_log_level(mut self, level: Level) -> Self {
+        self.log_level = Some(level);
+        self
+    }
+
+    /// Sets the tracing output format.
+    #[must_use]
+    pub fn with_tracing_format(mut self, format: TracingFormat) -> Self {
+        self.tracing_format = Some(format);
+        self
+    }
+
+    /// Sets a custom environment filter string for tracing.
+    ///
+    /// Format: `target=level,target=level,...`
+    #[must_use]
+    pub fn with_env_filter(mut self, filter: impl Into<String>) -> Self {
+        self.env_filter = Some(filter.into());
+        self
+    }
+
+    /// Enables or disables span enter/exit events in tracing output.
+    #[must_use]
+    pub fn with_span_events(mut self, enabled: bool) -> Self {
+        self.span_events = Some(enabled);
+        self
+    }
+}
+
+impl Default for DefaultPlugins {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PluginGroup for DefaultPlugins {
     fn build(self) -> PluginGroupBuilder {
+        let mut tracing = TracingPlugin::default();
+        if let Some(level) = self.log_level {
+            tracing = tracing.with_level(level);
+        }
+        if let Some(format) = self.tracing_format {
+            tracing = tracing.with_format(format);
+        }
+        if let Some(filter) = self.env_filter {
+            tracing = tracing.with_env_filter(filter);
+        }
+        if let Some(enabled) = self.span_events {
+            tracing = tracing.with_span_events(enabled);
+        }
+
         PluginGroupBuilder::new()
             .add(ServerInfoPlugin)
             .add(TimePlugin::default())
-            .add(TracingPlugin::default())
+            .add(tracing)
     }
 }
 
@@ -123,7 +225,7 @@ impl PluginGroup for DefaultPlugins {
 /// ```no_run
 /// use polaris_system::server::Server;
 /// use polaris_system::plugin::PluginGroup;
-/// use polaris_core::MinimalPlugins;
+/// use polaris_core_plugins::MinimalPlugins;
 ///
 /// Server::new()
 ///     .add_plugins(MinimalPlugins.build())
@@ -146,7 +248,18 @@ mod tests {
 
     #[test]
     fn default_plugins_builds() {
-        let builder = DefaultPlugins.build();
+        let builder = DefaultPlugins::new().build();
+        assert_eq!(builder.len(), 3);
+    }
+
+    #[test]
+    fn default_plugins_with_options() {
+        let builder = DefaultPlugins::new()
+            .with_log_level(Level::DEBUG)
+            .with_tracing_format(TracingFormat::Json)
+            .with_env_filter("polaris=debug")
+            .with_span_events(true)
+            .build();
         assert_eq!(builder.len(), 3);
     }
 

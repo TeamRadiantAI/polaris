@@ -40,7 +40,8 @@
 //! - [`FunctionParam`] / [`InputParam`] — parameter extraction
 //! - [`FunctionMetadata`] / [`ParameterInfo`] — schema building
 
-// Self-reference to ensure `#[tool]`/`#[toolset]` macro-generated code can use `polaris_tools::` paths within this crate.
+// Self-reference so `#[tool]`/`#[toolset]` macro-generated code can use `polaris_tools::` paths
+// within this crate.
 extern crate self as polaris_tools;
 
 pub mod error;
