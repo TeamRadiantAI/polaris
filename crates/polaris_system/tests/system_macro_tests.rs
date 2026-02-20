@@ -4,10 +4,12 @@
 //! generates code using `::polaris_system::` paths, which only work when
 //! the crate is used as an external dependency.
 
+use core::any::TypeId;
 use polaris_system::param::{Out, Res, ResMut, SystemContext};
+use polaris_system::prelude::SystemError;
 use polaris_system::resource::LocalResource;
 use polaris_system::system;
-use polaris_system::system::System;
+use polaris_system::system::{ErasedSystem, System};
 
 #[derive(Debug, PartialEq, Clone)]
 struct TestOutput {
@@ -123,4 +125,73 @@ async fn macro_output_chain_system() {
 fn macro_system_has_correct_name() {
     let system = macro_read_counter();
     assert_eq!(System::name(&system), "macro_read_counter");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fallible system (Result<T, SystemError>)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[system]
+async fn macro_fallible(counter: Res<Counter>) -> Result<TestOutput, SystemError> {
+    if counter.count < 0 {
+        return Err(SystemError::ExecutionError("negative count".to_string()));
+    }
+    Ok(TestOutput {
+        value: counter.count,
+    })
+}
+
+#[test]
+fn macro_fallible_output_type_is_unwrapped() {
+    let system = macro_fallible();
+    // Output type should be TestOutput, not Result<TestOutput, SystemError>
+    assert_eq!(system.output_type_id(), TypeId::of::<TestOutput>());
+    assert_ne!(
+        system.output_type_id(),
+        TypeId::of::<Result<TestOutput, SystemError>>()
+    );
+}
+
+#[tokio::test]
+async fn macro_fallible_ok_returns_output() {
+    let system = macro_fallible();
+    let ctx = SystemContext::new().with(Counter { count: 10 });
+
+    let result = system.run(&ctx).await.unwrap();
+    assert_eq!(result.value, 10);
+}
+
+#[tokio::test]
+async fn macro_fallible_err_propagates() {
+    let system = macro_fallible();
+    let ctx = SystemContext::new().with(Counter { count: -1 });
+
+    let result = system.run(&ctx).await;
+    assert!(result.is_err());
+    assert!(
+        matches!(result.unwrap_err(), SystemError::ExecutionError(msg) if msg == "negative count")
+    );
+}
+
+#[tokio::test]
+async fn macro_fallible_erased_ok_stores_correct_type() {
+    let system = macro_fallible();
+    let erased: &dyn ErasedSystem = &system;
+    let ctx = SystemContext::new().with(Counter { count: 5 });
+
+    let boxed = erased.run_erased(&ctx).await.unwrap();
+    let concrete = boxed
+        .downcast::<TestOutput>()
+        .expect("should downcast to TestOutput, not Result");
+    assert_eq!(concrete.value, 5);
+}
+
+#[tokio::test]
+async fn macro_fallible_erased_err_propagates() {
+    let system = macro_fallible();
+    let erased: &dyn ErasedSystem = &system;
+    let ctx = SystemContext::new().with(Counter { count: -1 });
+
+    let result = erased.run_erased(&ctx).await;
+    assert!(result.is_err());
 }

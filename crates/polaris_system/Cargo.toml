@@ -19,3 +19,4 @@ variadics_please = "1.1"
 # Async runtime
 [dev-dependencies]
 tokio = { version = "1.43", features = ["rt", "sync", "macros"] }
+trybuild = "1.0"

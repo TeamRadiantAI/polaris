@@ -22,7 +22,9 @@ mod crate_path;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{FnArg, ItemFn, Pat, ReturnType, parse_macro_input};
+use syn::{
+    FnArg, GenericArgument, ItemFn, Pat, PathArguments, ReturnType, Type, parse_macro_input,
+};
 
 /// Transforms an async function into a System implementation.
 ///
@@ -35,6 +37,14 @@ use syn::{FnArg, ItemFn, Pat, ReturnType, parse_macro_input};
 /// #[system]
 /// async fn my_system(res: Res<MyResource>) -> MyOutput {
 ///     MyOutput { value: res.field }
+/// }
+///
+/// // Fallible systems can return Result<T, SystemError>.
+/// // The macro extracts T as the output type and propagates errors.
+/// #[system]
+/// async fn fallible_system(res: Res<MyResource>) -> Result<MyOutput, SystemError> {
+///     let value = do_something(&res).map_err(|e| SystemError::ExecutionError(e.to_string()))?;
+///     Ok(MyOutput { value })
 /// }
 ///
 /// // Creates a system:
@@ -96,10 +106,18 @@ pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let body = &input.block;
     let vis = &input.vis;
 
-    // Extract return type (default to () if not specified)
-    let ret_type = match &input.sig.output {
-        ReturnType::Type(_, ty) => quote!(#ty),
-        ReturnType::Default => quote!(()),
+    // Extract return type (default to () if not specified).
+    // If the return type is `Result<T, SystemError>`, extract `T` as the output type
+    // and let the body's Result propagate directly (no extra `Ok()` wrapping).
+    let (ret_type, returns_result) = match &input.sig.output {
+        ReturnType::Type(_, ty) => {
+            if let Some(ok_type) = extract_result_system_error(ty) {
+                (quote!(#ok_type), true)
+            } else {
+                (quote!(#ty), false)
+            }
+        }
+        ReturnType::Default => (quote!(()), false),
     };
 
     // Extract parameters and generate fetch calls + access merges
@@ -158,6 +176,14 @@ pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
         })
         .collect();
 
+    // When the function returns `Result<T, SystemError>`, the body already produces a Result,
+    // so we use it directly. Otherwise, wrap in `Ok()`.
+    let body_expr = if returns_result {
+        quote!(#body)
+    } else {
+        quote!(::core::result::Result::Ok(#body))
+    };
+
     // Generate the struct and System impl
     // Note: Uses `::polaris_system::` paths for use within polaris_system crate.
     // The macro is re-exported from polaris_system via `pub use polaris_system_macros::system;`
@@ -174,7 +200,7 @@ pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> #ps::system::BoxFuture<'a, ::core::result::Result<Self::Output, #ps::system::SystemError>> {
                 ::std::boxed::Box::pin(async move {
                     #(#fetch_stmts)*
-                    ::core::result::Result::Ok(#body)
+                    #body_expr
                 })
             }
 
@@ -196,6 +222,50 @@ pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+/// If `ty` is `Result<T, SystemError>`, returns `Some(T)`.
+///
+/// This allows the `#[system]` macro to detect fallible systems and avoid
+/// double-wrapping the return value in `Ok()`. The error type is checked
+/// by its last path segment being `SystemError`.
+fn extract_result_system_error(ty: &Type) -> Option<Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+
+    let last_segment = type_path.path.segments.last()?;
+    if last_segment.ident != "Result" {
+        return None;
+    }
+
+    let PathArguments::AngleBracketed(angle_args) = &last_segment.arguments else {
+        return None;
+    };
+
+    if angle_args.args.len() != 2 {
+        return None;
+    }
+
+    // Check that the error type's last segment is `SystemError`.
+    let GenericArgument::Type(err_type) = &angle_args.args[1] else {
+        return None;
+    };
+
+    let Type::Path(err_path) = err_type else {
+        return None;
+    };
+
+    let err_last_segment = err_path.path.segments.last()?;
+    if err_last_segment.ident != "SystemError" {
+        return None;
+    }
+
+    // Extract the Ok type.
+    let GenericArgument::Type(ok_type) = &angle_args.args[0] else {
+        return None;
+    };
+    Some(ok_type.clone())
 }
 
 /// Converts `snake_case` to `PascalCase`.

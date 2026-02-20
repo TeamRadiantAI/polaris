@@ -30,6 +30,7 @@ Cargo.lock
 /logs/
 clippy.md
 .vscode/*
+*proptest-regressions
 
 # OS generated files
 .DS_Store
