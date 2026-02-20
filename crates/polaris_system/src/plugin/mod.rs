@@ -141,6 +141,12 @@ impl PluginId {
     }
 }
 
+impl From<&'static str> for PluginId {
+    fn from(value: &'static str) -> Self {
+        Self::new(value)
+    }
+}
+
 impl core::fmt::Display for PluginId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.0)

@@ -7,7 +7,7 @@ CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 
 [tasks.test]
 description = "Run all testing steps (build, format, clippy, test)"
-dependencies = ["build", "test-format", "test-clippy", "test-polaris-system", "test-polaris-graph", "test-polaris-agent"]
+dependencies = ["build", "test-format", "test-clippy", "test-polaris-system", "test-polaris-graph", "test-polaris-agent", "test-polaris-tools"]
 
 [tasks.build]
 description = "Build the project"
@@ -34,6 +34,9 @@ description = "Run polaris-system tests"
 command = "cargo"
 args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_system"]
 
+[tasks.test-polaris-system.env]
+TRYBUILD = "overwrite"
+
 [tasks.test-polaris-graph]
 description = "Run polaris-graph tests"
 command = "cargo"
@@ -43,3 +46,11 @@ args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_g
 description = "Run polaris-agent tests"
 command = "cargo"
 args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_agent"]
+
+[tasks.test-polaris-tools]
+description = "Run polaris-tools tests (integration + compile-fail)"
+command = "cargo"
+args = ["test", "--verbose", "--all-targets", "--all-features", "-p", "polaris_tools"]
+
+[tasks.test-polaris-tools.env]
+TRYBUILD = "overwrite"

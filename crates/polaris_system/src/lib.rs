@@ -21,7 +21,7 @@
 //! # Example
 //!
 //! ```
-//! use polaris_system::plugin::Plugin;
+//! use polaris_system::plugin::{Plugin, Version};
 //! use polaris_system::server::Server;
 //! use polaris_system::resource::GlobalResource;
 //!
@@ -32,6 +32,9 @@
 //! struct MyPlugin;
 //!
 //! impl Plugin for MyPlugin {
+//!     const ID: &'static str = "namespace::my_plugin";
+//!     const VERSION: Version = Version::new(0, 1, 0);
+//!
 //!     fn build(&self, server: &mut Server) {
 //!         server.insert_global(MyConfig::default());
 //!     }
