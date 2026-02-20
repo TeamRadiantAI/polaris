@@ -31,7 +31,11 @@ fn convert_content_block(
     block: bedrock::ContentBlock,
 ) -> Result<polaris_llm::AssistantBlock, GenerationError> {
     match block {
-        bedrock::ContentBlock::Text(text) => Ok(polaris_llm::AssistantBlock::Text(text)),
+        bedrock::ContentBlock::Text(text) => {
+            Ok(polaris_llm::AssistantBlock::Text(polaris_llm::TextBlock {
+                text,
+            }))
+        }
         bedrock::ContentBlock::ToolUse(tool_use) => Ok(convert_tool_use(tool_use)),
         other => Err(GenerationError::InvalidResponse(format!(
             "unsupported Bedrock content block type: {other:?}"

@@ -141,7 +141,7 @@ impl ToolRegistry {
 pub struct ToolsPlugin;
 
 impl Plugin for ToolsPlugin {
-    const ID: &'static str = "polaris::tools_plugin";
+    const ID: &'static str = "polaris::tools";
     const VERSION: Version = Version::new(0, 0, 1);
 
     fn build(&self, server: &mut Server) {

@@ -32,8 +32,8 @@
 //! struct MyPlugin;
 //!
 //! impl Plugin for MyPlugin {
-//!     const ID: &'static str = "namespace::my_plugin";
-//!     const VERSION: Version = Version::new(0, 1, 0);
+//!     const ID: &'static str = "my_plugin";
+//!     const VERSION: Version = Version::new(0, 0, 1);
 //!
 //!     fn build(&self, server: &mut Server) {
 //!         server.insert_global(MyConfig::default());

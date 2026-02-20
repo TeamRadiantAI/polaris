@@ -6,6 +6,7 @@
 //! - [`TimePlugin`] - Time utilities with mockable clock for testing
 //! - [`TracingPlugin`] - Logging and observability via the `tracing` crate
 //! - [`IOPlugin`] - I/O abstractions for agent communication (opt-in)
+//! - [`persistence::PersistencePlugin`] - Persistence registry for storable resources
 //! - [`DefaultPlugins`] - Convenient bundle of all infrastructure plugins
 //!
 //! # Feature Flags
@@ -48,7 +49,11 @@
 //! - **Layer 2** (`polaris_graph`, `polaris_agent`): Graph execution and agent patterns
 //! - **Layer 3** (plugins): Concrete agent implementations
 
+// Self-reference ensuring `#[derive(Storable)]` macro-generated code can use `polaris_core_plugins::` paths within this crate.
+extern crate self as polaris_core_plugins;
+
 mod io;
+pub mod persistence;
 mod server_info;
 mod time;
 mod tracing_plugin;
@@ -69,6 +74,11 @@ pub use io::{
 pub use io::MockIOProvider;
 #[cfg(any(test, feature = "test-utils"))]
 pub use time::MockClock;
+
+// Re-export persistence types
+pub use persistence::{
+    PersistenceAPI, PersistenceError, PersistencePlugin, ResourceSerializer, Storable,
+};
 
 // Re-export resources
 pub use server_info::ServerInfo;

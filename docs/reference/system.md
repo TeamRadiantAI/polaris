@@ -27,6 +27,21 @@ As all state flows through parameters, a system has no hidden dependencies, whic
 
 The macro generates two items: a struct that implements the `System` trait, and a factory function that returns an instance of that struct.
 
+### Fallible Systems
+
+Systems that may fail can return `Result<T, SystemError>`. The macro detects this pattern and extracts `T` as the system's output type. On success, `T` is stored in the context for downstream `Out<T>` access. On error, the `SystemError` propagates to the executor, which routes to an error edge or halts the graph.
+
+```rust
+#[system]
+async fn reason(llm: Res<LLM>, memory: Res<Memory>) -> Result<ReasoningResult, SystemError> {
+    let response = llm.generate(&memory.messages).await
+        .map_err(|err| SystemError::ExecutionError(err.to_string()))?;
+    Ok(ReasoningResult { action: response.action })
+}
+```
+
+In the example above, the output type is `ReasoningResult` (not `Result<ReasoningResult, SystemError>`), so downstream systems use `Out<ReasoningResult>`.
+
 <details>
 <summary>Macro expansion details</summary>
 

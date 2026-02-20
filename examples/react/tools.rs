@@ -98,7 +98,7 @@ impl FileToolsPlugin {
 }
 
 impl Plugin for FileToolsPlugin {
-    const ID: &'static str = "example::file_tools";
+    const ID: &'static str = "examples::file_tools";
     const VERSION: Version = Version::new(0, 0, 1);
 
     fn dependencies(&self) -> Vec<PluginId> {

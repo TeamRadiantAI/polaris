@@ -18,8 +18,6 @@
 //! let system = read_counter();
 //! ```
 
-mod crate_path;
-
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
@@ -98,7 +96,7 @@ pub fn system(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // Auto-detect crate path (works with both `polaris_system` and `polaris` umbrella).
-    let ps = crate_path::polaris_system_path();
+    let ps = polaris_macro_utils::resolve_crate_path(polaris_macro_utils::PolarisCrate::System);
 
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();

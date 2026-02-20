@@ -44,7 +44,7 @@ pub mod agent {
     pub use polaris_agent::*;
 }
 
-/// Re-export all model-related types for easy access.
+/// Re-export all tool-related types for easy access.
 pub mod tools {
     pub use polaris_tools::*;
 }

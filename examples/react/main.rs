@@ -5,17 +5,16 @@
 //! # Usage
 //!
 //! ```bash
-//! react <working_dir> <query>
+//! cargo run -p examples --bin react -- <working_dir> <query>
 //! ```
 //!
 //! # Example
 //!
 //! ```bash
-//! react ./sandbox "List all files"
+//! cargo run -p examples --bin react -- ./sandbox "List all files"
 //! ```
 
-use examples::tools::FileToolsPlugin;
-use examples::{AgentConfig, ContextManager, ReActAgent, ReactState};
+use examples::{AgentConfig, ContextManager, FileToolsPlugin, ReActAgent, ReActPlugin, ReactState};
 use polaris::{
     agent::AgentExt,
     graph::GraphExecutor,
@@ -65,6 +64,7 @@ async fn main() {
     server.add_plugins(BedrockPlugin::from_env());
     server.add_plugins(ToolsPlugin);
     server.add_plugins(FileToolsPlugin::new(config.clone()));
+    server.add_plugins(ReActPlugin);
     server.finish();
 
     // Create execution context
