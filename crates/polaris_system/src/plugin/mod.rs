@@ -308,15 +308,6 @@ pub trait Plugin: Send + Sync + 'static {
     fn dependencies(&self) -> Vec<PluginId> {
         Vec::new()
     }
-
-    /// Returns true if this plugin can only be added once.
-    ///
-    /// Default is `true` — adding the same plugin type twice will panic.
-    /// Set to `false` for plugins that can be added multiple times with
-    /// different configurations.
-    fn is_unique(&self) -> bool {
-        true
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,8 +340,6 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     fn tick_schedules(&self) -> Vec<ScheduleId>;
     /// See [`Plugin::dependencies`].
     fn dependencies(&self) -> Vec<PluginId>;
-    /// See [`Plugin::is_unique`].
-    fn is_unique(&self) -> bool;
 }
 
 impl<T: Plugin> DynPlugin for T {
@@ -377,9 +366,6 @@ impl<T: Plugin> DynPlugin for T {
     }
     fn dependencies(&self) -> Vec<PluginId> {
         Plugin::dependencies(self)
-    }
-    fn is_unique(&self) -> bool {
-        Plugin::is_unique(self)
     }
 }
 
@@ -427,7 +413,7 @@ impl Plugins for PluginGroupBuilder {
 /// # Example
 ///
 /// ```ignore
-/// pub struct DefaultPlugins;
+/// pub struct DefaultPlugins { /* ... */ }
 ///
 /// impl PluginGroup for DefaultPlugins {
 ///     fn build(self) -> PluginGroupBuilder {
@@ -438,13 +424,12 @@ impl Plugins for PluginGroupBuilder {
 ///     }
 /// }
 ///
-/// // Use with customization
+/// // Use with customization (add replaces by type if already present)
 /// Server::new()
 ///     .add_plugins(
-///         DefaultPlugins
+///         DefaultPlugins::new()
 ///             .build()
-///             .disable::<TracingPlugin>()
-///             .add(CustomTracingPlugin::new())
+///             .add(TracingPlugin::default().with_level(Level::DEBUG))
 ///     )
 ///     .run();
 /// ```
@@ -480,10 +465,9 @@ pub(crate) struct BoxedPlugin {
 ///
 /// ```ignore
 /// // Customize a plugin group
-/// DefaultPlugins
+/// DefaultPlugins::new()
 ///     .build()
-///     .disable::<TracingPlugin>()
-///     .add(CustomTracingPlugin::new())
+///     .add(TracingPlugin::default().with_level(Level::DEBUG))  // replaces existing
 ///     .add_after::<MetricsPlugin, IOPlugin>(MetricsPlugin)
 /// ```
 #[derive(Default)]
@@ -501,7 +485,8 @@ impl PluginGroupBuilder {
         }
     }
 
-    /// Adds a plugin to the end of the group.
+    /// Adds a plugin to the group, or replaces it if one of the same type
+    /// already exists (preserving its position).
     #[must_use]
     #[expect(
         clippy::should_implement_trait,
@@ -509,10 +494,17 @@ impl PluginGroupBuilder {
     )]
     pub fn add<P: Plugin>(mut self, plugin: P) -> Self {
         let id = PluginId::of::<P>();
-        self.plugins.push(BoxedPlugin {
-            id,
-            plugin: Box::new(plugin),
-        });
+        if let Some(pos) = self.plugins.iter().position(|p| p.id == id) {
+            self.plugins[pos] = BoxedPlugin {
+                id,
+                plugin: Box::new(plugin),
+            };
+        } else {
+            self.plugins.push(BoxedPlugin {
+                id,
+                plugin: Box::new(plugin),
+            });
+        }
         self
     }
 
@@ -646,11 +638,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_default_is_unique() {
-        assert!(Plugin::is_unique(&PluginA));
-    }
-
-    #[test]
     fn plugin_default_dependencies_empty() {
         assert!(Plugin::dependencies(&PluginA).is_empty());
     }
@@ -780,35 +767,6 @@ mod tests {
         // Should still have PluginA
         assert_eq!(builder.len(), 1);
         assert!(builder.plugins[0].id == PluginId::of::<PluginA>());
-    }
-
-    // Test non-unique plugin behavior
-    struct NonUniquePlugin;
-
-    impl Plugin for NonUniquePlugin {
-        const ID: &'static str = "test::non_unique";
-        const VERSION: Version = Version::new(0, 0, 1);
-        fn build(&self, _server: &mut Server) {}
-
-        fn is_unique(&self) -> bool {
-            false // Can be added multiple times
-        }
-    }
-
-    #[test]
-    fn non_unique_plugin_can_be_added_multiple_times() {
-        let mut server = Server::new();
-
-        // Should not panic even when adding the same plugin type multiple times
-        server.add_plugins(NonUniquePlugin);
-        server.add_plugins(NonUniquePlugin);
-        server.add_plugins(NonUniquePlugin);
-
-        server.finish();
-
-        // All three instances should have been built
-        // (We can't directly verify this without side effects, but the key point
-        // is that it doesn't panic like unique plugins would)
     }
 
     #[test]
