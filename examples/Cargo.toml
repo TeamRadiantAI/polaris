@@ -7,10 +7,11 @@ repository = "https://github.com/TeamRadiantAI/polaris"
 rust-version = "1.93.0"
 publish = false
 
-[workspace]
-
 [lints.clippy]
 allow_attributes_without_reason = "allow"
+
+[lints.rust]
+missing_docs = "allow"
 
 [dependencies]
 polaris = { path = "..", features = ["bedrock"] }
@@ -20,6 +21,7 @@ schemars = "1.2"
 tracing = "0.1"
 dotenvy = "0.15"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+parking_lot = "0.12"
 
 [lib]
 path = "react/lib.rs"
@@ -27,3 +29,7 @@ path = "react/lib.rs"
 [[bin]]
 name = "react"
 path = "react/main.rs"
+
+[[bin]]
+name = "sessions"
+path = "sessions/main.rs"

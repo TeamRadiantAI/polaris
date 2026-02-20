@@ -28,7 +28,9 @@ pub mod tools;
 
 pub use config::AgentConfig;
 pub use context::ContextManager;
+pub use polaris::plugins::{PersistenceAPI, PersistencePlugin};
 pub use state::ReactState;
+pub use tools::FileToolsPlugin;
 
 use polaris::agent::Agent;
 use polaris::graph::Graph;
@@ -38,11 +40,33 @@ use polaris::models::llm::{
     AssistantBlock, GenerationRequest, Message, ToolChoice, ToolFunction, ToolResultContent,
 };
 use polaris::system::param::{Out, Res, ResMut};
+use polaris::system::plugin::{Plugin, Version};
+use polaris::system::server::Server;
 use polaris::system::system;
 use polaris::tools::ToolRegistry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// Plugin that registers the `ReAct` agent's local resources.
+pub struct ReActPlugin;
+
+impl Plugin for ReActPlugin {
+    const ID: &'static str = "examples::react";
+    const VERSION: Version = Version::new(0, 0, 1);
+
+    fn build(&self, server: &mut Server) {
+        server.register_local(ContextManager::default);
+        server.register_local(ReactState::default);
+    }
+
+    fn ready(&self, server: &mut Server) {
+        // If a PersistenceAPI is available, register ContextManager for persistence.
+        if let Some(api) = server.api::<PersistenceAPI>() {
+            api.register::<ContextManager>(Self::ID);
+        }
+    }
+}
 
 const SYSTEM_PROMPT: &str = "You are a helpful ReAct agent. Think step by step.";
 

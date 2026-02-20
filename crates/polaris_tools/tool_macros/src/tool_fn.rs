@@ -1,14 +1,13 @@
 //! Code generation for `#[tool]` on standalone async functions.
 
-use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
-use syn::{FnArg, ItemFn};
-
 use crate::common::{
     extract_doc_comments, generate_definition, generate_execute, parse_param, to_pascal_case,
     validate_standalone_tool, validate_tool_signature,
 };
-use crate::crate_path::CratePaths;
+use polaris_macro_utils::{PolarisCrate, resolve_crate_path};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+use syn::{FnArg, ItemFn};
 
 /// Generates a Tool impl struct for a standalone `#[tool]` async function.
 ///
@@ -24,9 +23,8 @@ pub(crate) fn generate_tool_fn(input: &ItemFn) -> TokenStream {
         return err;
     }
 
-    let paths = CratePaths::resolve();
-    let pt = &paths.polaris_tools;
-    let pm = &paths.polaris_models;
+    let pt = resolve_crate_path(PolarisCrate::Tools);
+    let pm = resolve_crate_path(PolarisCrate::Models);
 
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();
@@ -50,15 +48,10 @@ pub(crate) fn generate_tool_fn(input: &ItemFn) -> TokenStream {
         })
         .collect();
 
-    let definition_code = generate_definition(&fn_name_str, description_str, &params, &paths);
+    let definition_code = generate_definition(&fn_name_str, description_str, &params, &pt);
     let call_target = quote! { #impl_fn_name };
-    let execute_code = generate_execute(
-        &fn_name_str,
-        &call_target,
-        &params,
-        &input.sig.output,
-        &paths,
-    );
+    let execute_code =
+        generate_execute(&fn_name_str, &call_target, &params, &input.sig.output, &pt);
 
     let vis = &input.vis;
     let block = &input.block;

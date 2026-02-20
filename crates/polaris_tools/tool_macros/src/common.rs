@@ -7,8 +7,6 @@ use syn::{
     ReturnType, Signature, Type,
 };
 
-use crate::crate_path::CratePaths;
-
 /// Validates that a function signature is suitable for `#[tool]`.
 ///
 /// Rejects non-async, generic, unsafe, and extern functions.
@@ -208,10 +206,8 @@ pub(crate) fn generate_definition(
     fn_name: &str,
     description: &str,
     params: &[ParamInfo],
-    paths: &CratePaths,
+    pt: &TokenStream,
 ) -> TokenStream {
-    let pt = &paths.polaris_tools;
-
     let param_additions: Vec<_> = params
         .iter()
         .map(|param| {
@@ -281,10 +277,8 @@ pub(crate) fn generate_execute(
     call_target: &TokenStream,
     params: &[ParamInfo],
     return_type: &ReturnType,
-    paths: &CratePaths,
+    pt: &TokenStream,
 ) -> TokenStream {
-    let pt = &paths.polaris_tools;
-
     let call_preamble = if !params.is_empty() {
         quote! {
             let __call = #pt::FunctionCall::from_value(#fn_name, __args)?;

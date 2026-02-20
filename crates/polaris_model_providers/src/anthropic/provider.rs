@@ -136,7 +136,9 @@ fn convert_image_to_source(image: &ImageBlock) -> Result<ImageSource, Generation
 
 fn convert_user_block(block: &UserBlock) -> Result<ContentBlockParam, GenerationError> {
     match block {
-        UserBlock::Text(text) => Ok(ContentBlockParam::Text { text: text.clone() }),
+        UserBlock::Text(block) => Ok(ContentBlockParam::Text {
+            text: block.text.clone(),
+        }),
         UserBlock::Image(image) => {
             let source = convert_image_to_source(image)?;
             Ok(ContentBlockParam::Image { source })
@@ -172,7 +174,9 @@ fn convert_user_block(block: &UserBlock) -> Result<ContentBlockParam, Generation
 
 fn convert_assistant_block(block: &AssistantBlock) -> Result<ContentBlockParam, GenerationError> {
     match block {
-        AssistantBlock::Text(text) => Ok(ContentBlockParam::Text { text: text.clone() }),
+        AssistantBlock::Text(block) => Ok(ContentBlockParam::Text {
+            text: block.text.clone(),
+        }),
         AssistantBlock::ToolCall(call) => Ok(ContentBlockParam::ToolUse {
             id: call.id.clone(),
             name: call.function.name.clone(),
@@ -223,7 +227,9 @@ fn convert_response(response: super::types::MessageResponse) -> GenerationRespon
 
 fn convert_content_block(block: ContentBlock) -> Option<AssistantBlock> {
     match block {
-        ContentBlock::Text { text } => Some(AssistantBlock::Text(text)),
+        ContentBlock::Text { text } => Some(AssistantBlock::Text(polaris_models::llm::TextBlock {
+            text,
+        })),
         ContentBlock::ToolUse { id, name, input } => Some(AssistantBlock::ToolCall(ToolCall {
             id: id.clone(),
             call_id: None,

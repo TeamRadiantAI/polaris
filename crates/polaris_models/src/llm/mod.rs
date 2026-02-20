@@ -18,6 +18,6 @@ pub use provider::LlmProvider;
 pub use types::{
     AssistantBlock, AudioBlock, AudioMediaType, DocumentBlock, DocumentMediaType, DocumentSource,
     GenerationRequest, GenerationResponse, ImageBlock, ImageMediaType, Message, ReasoningBlock,
-    ToolCall, ToolChoice, ToolDefinition, ToolFunction, ToolResult, ToolResultContent,
+    TextBlock, ToolCall, ToolChoice, ToolDefinition, ToolFunction, ToolResult, ToolResultContent,
     ToolResultStatus, Usage, UserBlock,
 };

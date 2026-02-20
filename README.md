@@ -1,79 +1,91 @@
 # Polaris
 
-> **Pre-Alpha** — Layers 1-2 are functional. Layer 3 (LLM providers, tools, agent plugins) is not yet implemented. APIs may change. See [Project Status](#project-status).
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Rust](https://img.shields.io/badge/rust-1.93.0%2B-orange.svg)](https://www.rust-lang.org/)
+
+> **Pre-Alpha** — Core APIs are stabilizing but may change between releases. See [Project Status](#project-status).
 
 A Rust framework for building AI agents as composable directed graphs.
 
-## Why Polaris?
+## Why Polaris
 
-**Building performant AI agents is a design problem, not a technical problem.**
+Building performant AI agents is a design problem, not a technical problem. The right control flow, tool strategy, and memory architecture for a given use case aren't known upfront — they're discovered through experimentation.
 
-The bottleneck isn't compute or APIs — it's discovering the right control flow, tool strategy, and memory architecture. That requires rapid experimentation: try a design, observe, adjust, repeat.
+Polaris is designed around that workflow. Agent behavior is composed from small, independent parts that can be rearranged, swapped, and tested without touching the rest of the pipeline. There is no fixed execution loop and no prescribed agent pattern. See [philosophy.md](docs/philosophy.md) for the full rationale.
 
-Most frameworks give you a fixed loop and ask you to fill in the blanks. Polaris gives you **building blocks** and lets you design the loop itself.
+## Features
 
-- **Agents are designs, not programs** — graphs you iterate on, not code you debug
-- **Composition over inheritance** — swap reasoning, tools, or memory independently
-- **Everything is a plugin** — no built-in behavior, everything replaceable
-- **Type-safe at compile time** — invalid designs fail fast, not in production
+- **Design agents as graphs** — Wire together reasoning, tool use, and memory as nodes in a directed graph with sequential, conditional, parallel, and looping control flow.
+- **Composition over inheritance** — Swap your LLM provider, tool set, or memory backend without restructuring your agent. Reasoning, tools, and memory are independent components that can be rearranged and replaced in isolation.
+- **Everything is a plugin** — No built-in behavior. LLM providers, tools, memory, logging, and tracing are all plugins with managed lifecycles and automatic dependency resolution. Every component is replaceable.
+- **Type-safe at compile time** — Graph structure, state types, and resource dependencies are validated by the Rust type system. Invalid designs fail fast, not in production.
+- **Inspect and observe everything** — The full agent topology is a data structure you can traverse, and lifecycle hooks give you visibility into every node execution without touching agent logic.
+- **Scale to multi-agent** — Each agent runs in an isolated context with its own state, while sharing global resources through a managed context hierarchy.
 
-For the full rationale, see [philosophy.md](docs/philosophy.md).
+## Example
 
-## How It Works
-
-Agents are directed graphs of async functions. The graph *is* the design.
+An agent is a type that builds a graph. This ReAct agent loops through reasoning, tool selection, and observation until the task is complete:
 
 ```rust
 struct ReActAgent;
 
 impl Agent for ReActAgent {
     fn build(&self, graph: &mut Graph) {
-        graph.add_loop::<ReActState, _, _>(
+        graph.add_system(init);
+
+        graph.add_loop::<ReactState, _, _>(
             "react_loop",
             |state| state.is_complete,
             |g| {
-                g.add_system(reason)
-                 .add_conditional_branch::<ReasoningResult, _, _, _>(
-                     "check_action",
-                     |r| r.action == Action::UseTool,
-                     |g| { g.add_system(invoke_tool).add_system(observe); },
-                     |g| { g.add_system(respond); },
-                 );
+                g.add_system(reason);
+                g.add_conditional_branch::<ReasoningResult, _, _, _>(
+                    "action",
+                    |result| result.action == Action::UseTool,
+                    |tool_branch| {
+                        tool_branch.add_system(select_tool);
+                        tool_branch.add_system(execute_tool);
+                        tool_branch.add_system(observe);
+                    },
+                    |respond_branch| {
+                        respond_branch.add_system(respond);
+                    },
+                );
             },
         );
     }
 }
 ```
 
-Same pattern, different tools, different models — the graph structure is portable. Systems are pure async functions with dependency injection. See [agents.md](docs/design_patterns/agents.md), [system.md](docs/design_patterns/system.md), and [graph.md](docs/design_patterns/graph.md).
+See [`crates/example`](crates/example) for a full implementation of a file assistant that reasons, selects tools, and acts within a sandboxed directory.
+
+## Getting Started
+
+> Not yet published to crates.io — install from git.
+
+```toml
+[dependencies]
+polaris = { git = "https://github.com/TeamRadiantAI/polar-rs" }
+```
+
+Requires **Rust 1.93.0+** (Edition 2024). Run `cargo make test` for the full test suite.
+
+## Documentation
+
+Architecture, design patterns, and API reference are available in the [docs](docs/README.md) directory.
 
 ## Project Status
 
 | Component | Status |
 |-----------|--------|
-| Layer 1: System Framework (Systems, Resources, Plugins, Server) | **Implemented** |
-| Layer 2: Graph Execution (Nodes, Edges, Executor, Hooks) | **Implemented** |
-| Layer 2: Agent Trait | **Implemented** |
-| Layer 3: LLM Providers, Tool Registry, Agent Plugins | Planned |
+| System Framework (Systems, Resources, Plugins, Server) | **Implemented** |
+| Graph Execution (Nodes, Edges, Executor, Hooks) | **Implemented** |
+| Agent Trait | **Implemented** |
+| Model Registry and Providers | **Implemented** |
+| Tool Registry | **Implemented** |
+| IO Plugin | **Implemented** |
+| Agent Plugins | Planned |
 | Sessions, Groups, CLI/HTTP Interfaces | Planned |
-
-## Getting Started
-
-> Not yet on crates.io — install from git.
-
-```toml
-[dependencies]
-polaris = { git = "https://github.com/TeamRadiantAI/polaris" }
-```
-
-**Requires** Rust 1.93.0+ (Edition 2024). Run `cargo make test` for the full suite.
-
-## Documentation
-
-| | |
-|-|-|
-| [philosophy.md](docs/philosophy.md) | Design principles and rationale |
 
 ## License
 
-Apache-2.0 — [Repository](https://github.com/TeamRadiantAI/polaris)
+Apache-2.0 — [Repository](https://github.com/TeamRadiantAI/polar-rs)

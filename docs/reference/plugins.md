@@ -29,9 +29,6 @@ pub trait Plugin: Send + Sync + 'static {
     /// Declares plugins that must be added before this one.
     /// The server will panic if dependencies are not satisfied.
     fn dependencies(&self) -> Vec<PluginId> { Vec::new() }
-
-    /// Whether this plugin must be unique (cannot be added multiple times). Default: true.
-    fn is_unique(&self) -> bool { true }
 }
 ```
 

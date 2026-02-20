@@ -4,7 +4,6 @@
 //! grouped tools on impl blocks.
 
 mod common;
-mod crate_path;
 mod tool_fn;
 mod toolset;
 

@@ -45,7 +45,7 @@ fn convert_user_block(
     block: &polaris_llm::UserBlock,
 ) -> Result<bedrock::ContentBlock, GenerationError> {
     match block {
-        polaris_llm::UserBlock::Text(text) => Ok(bedrock::ContentBlock::Text(text.clone())),
+        polaris_llm::UserBlock::Text(block) => Ok(bedrock::ContentBlock::Text(block.text.clone())),
         polaris_llm::UserBlock::Image(image) => {
             Ok(bedrock::ContentBlock::Image(convert_image_to_block(image)?))
         }
@@ -66,7 +66,9 @@ fn convert_assistant_block(
     block: &polaris_llm::AssistantBlock,
 ) -> Result<bedrock::ContentBlock, GenerationError> {
     match block {
-        polaris_llm::AssistantBlock::Text(text) => Ok(bedrock::ContentBlock::Text(text.clone())),
+        polaris_llm::AssistantBlock::Text(block) => {
+            Ok(bedrock::ContentBlock::Text(block.text.clone()))
+        }
         polaris_llm::AssistantBlock::ToolCall(call) => {
             Ok(bedrock::ContentBlock::ToolUse(convert_tool_call(call)?))
         }

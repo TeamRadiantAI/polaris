@@ -200,7 +200,7 @@ impl core::fmt::Display for PluginId {
 ///
 /// impl Plugin for MetricsPlugin {
 ///     const ID: &'static str = "polaris::metrics";
-///     const VERSION: Version = Version::new(0, 1, 0);
+///     const VERSION: Version = Version::new(0, 0, 1);
 ///
 ///     fn build(&self, server: &mut Server) {
 ///         server.insert_resource(MetricsCollector::new(self.collect_interval));

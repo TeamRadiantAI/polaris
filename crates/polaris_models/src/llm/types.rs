@@ -168,7 +168,7 @@ impl GenerationResponse {
         self.content
             .iter()
             .filter_map(|block| match block {
-                AssistantBlock::Text(text) => Some(text.as_str()),
+                AssistantBlock::Text(block) => Some(block.text.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -216,7 +216,7 @@ impl Message {
     #[must_use]
     pub fn user(text: impl Into<String>) -> Self {
         Self::User {
-            content: vec![UserBlock::Text(text.into())],
+            content: vec![UserBlock::Text(TextBlock { text: text.into() })],
         }
     }
 
@@ -225,7 +225,7 @@ impl Message {
     pub fn assistant(text: impl Into<String>) -> Self {
         Self::Assistant {
             id: None,
-            content: vec![AssistantBlock::Text(text.into())],
+            content: vec![AssistantBlock::Text(TextBlock { text: text.into() })],
         }
     }
 
@@ -234,7 +234,7 @@ impl Message {
     pub fn assistant_with_id(id: impl Into<String>, text: impl Into<String>) -> Self {
         Self::Assistant {
             id: Some(id.into()),
-            content: vec![AssistantBlock::Text(text.into())],
+            content: vec![AssistantBlock::Text(TextBlock { text: text.into() })],
         }
     }
 
@@ -283,12 +283,19 @@ impl Message {
 // Content Blocks
 // ─────────────────────
 
+/// Plain text content block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextBlock {
+    /// The text content.
+    pub text: String,
+}
+
 /// Content that can appear in a user message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UserBlock {
     /// Plain text content.
-    Text(String),
+    Text(TextBlock),
     /// Image content for vision models.
     Image(ImageBlock),
     /// Audio content for speech models.
@@ -303,7 +310,7 @@ impl UserBlock {
     /// Creates a text content block.
     #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text(text.into())
+        Self::Text(TextBlock { text: text.into() })
     }
 
     /// Creates an image content block from base64-encoded data.
@@ -399,7 +406,7 @@ impl UserBlock {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AssistantBlock {
     /// Plain text content.
-    Text(String),
+    Text(TextBlock),
     /// A tool call request from the model.
     ToolCall(ToolCall),
     /// Reasoning/thinking content from the model.
@@ -410,7 +417,7 @@ impl AssistantBlock {
     /// Creates a text content block.
     #[must_use]
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text(text.into())
+        Self::Text(TextBlock { text: text.into() })
     }
 
     /// Creates a tool call content block.

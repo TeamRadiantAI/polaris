@@ -1,8 +1,10 @@
-# Example: ReAct Agent
+# Examples
 
-A file assistant that demonstrates the ReAct (Reasoning + Acting) pattern built with Polaris. See [agents.md](../../docs/reference/agents.md) for the pattern specification.
+## ReAct Agent
 
-## Tools
+A file assistant that demonstrates the ReAct (Reasoning + Acting) pattern built with Polaris. See [agents.md](../docs/reference/agents.md) for the pattern specification.
+
+### Tools
 
 | Tool | Description |
 |------|-------------|
@@ -12,7 +14,7 @@ A file assistant that demonstrates the ReAct (Reasoning + Acting) pattern built 
 
 All paths are relative to the working directory, which acts as a sandbox. The agent cannot access files outside this directory.
 
-## Running
+### Running
 
 Run the following commands from the `examples/` directory:
 
@@ -23,5 +25,19 @@ export ANTHROPIC_API_KEY=your-key
 cargo run --bin react -- <working_dir> <query>
 
 # Example
-cargo run --bin react -- ./sandbox "What files are here?"
+cargo run -p examples --bin react -- ./sandbox "What files are here?"
+```
+
+## Sessions
+
+Demonstrates resource persistence across runs. Reuses the ReAct agent and adds a `SessionPlugin` that saves/loads conversation history to a JSON file.
+
+### Running
+
+```bash
+# First run — ask a question
+cargo run -p examples --bin sessions -- test1 ./sandbox "What files are here?"
+
+# Second run — conversation history is restored
+cargo run -p examples --bin sessions -- test1 ./sandbox "Which file did I ask about?"
 ```

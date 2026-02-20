@@ -1,5 +1,6 @@
 //! Code generation for `#[toolset]` on impl blocks.
 
+use polaris_macro_utils::{PolarisCrate, resolve_crate_path};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{FnArg, Generics, ImplItem, ImplItemFn, ItemImpl, Type};
@@ -8,12 +9,10 @@ use crate::common::{
     extract_doc_comments, generate_definition, generate_execute, parse_param, to_pascal_case,
     validate_tool_signature, validate_toolset_method,
 };
-use crate::crate_path::CratePaths;
 
 /// Generates a Toolset impl for an impl block with `#[tool]` methods.
 pub(crate) fn generate_toolset(input: &ItemImpl) -> TokenStream {
-    let paths = CratePaths::resolve();
-    let pt = &paths.polaris_tools;
+    let pt = resolve_crate_path(PolarisCrate::Tools);
 
     let self_ty = &input.self_ty;
     let (impl_generics, _ty_generics, where_clause) = input.generics.split_for_impl();
@@ -37,7 +36,7 @@ pub(crate) fn generate_toolset(input: &ItemImpl) -> TokenStream {
     }
 
     // Generate inner tool structs for each method
-    let tool_struct_defs = generate_tool_structs(self_ty, &tool_methods, &input.generics, &paths);
+    let tool_struct_defs = generate_tool_structs(self_ty, &tool_methods, &input.generics);
 
     // Generate Toolset impl
     let tool_constructors: Vec<_> = tool_methods
@@ -106,11 +105,10 @@ fn generate_tool_structs(
     self_ty: &Type,
     methods: &[ImplItemFn],
     generics: &Generics,
-    paths: &CratePaths,
 ) -> TokenStream {
     let structs: Vec<_> = methods
         .iter()
-        .map(|method| generate_single_tool_struct(self_ty, method, generics, paths))
+        .map(|method| generate_single_tool_struct(self_ty, method, generics))
         .collect();
 
     quote! { #(#structs)* }
@@ -120,10 +118,9 @@ fn generate_single_tool_struct(
     self_ty: &Type,
     method: &ImplItemFn,
     generics: &Generics,
-    paths: &CratePaths,
 ) -> TokenStream {
-    let pt = &paths.polaris_tools;
-    let pm = &paths.polaris_models;
+    let pt = resolve_crate_path(PolarisCrate::Tools);
+    let pm = resolve_crate_path(PolarisCrate::Models);
 
     let method_name = &method.sig.ident;
     let method_name_str = method_name.to_string();
@@ -150,14 +147,14 @@ fn generate_single_tool_struct(
         })
         .collect();
 
-    let definition_code = generate_definition(&method_name_str, description_str, &params, paths);
+    let definition_code = generate_definition(&method_name_str, description_str, &params, &pt);
     let call_target = quote! { self.inner.#method_name };
     let execute_code = generate_execute(
         &method_name_str,
         &call_target,
         &params,
         &method.sig.output,
-        paths,
+        &pt,
     );
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();

@@ -1,10 +1,13 @@
 //! Conversation context management.
 
 use polaris::models::llm::{AssistantBlock, Message, UserBlock};
+use polaris::plugins::Storable;
 use polaris::system::resource::LocalResource;
+use serde::{Deserialize, Serialize};
 
 /// Manages conversation history for the agent.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Storable)]
+#[storable(key = "ContextManager")]
 pub struct ContextManager {
     /// The conversation message history.
     pub messages: Vec<Message>,
