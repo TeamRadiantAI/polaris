@@ -64,7 +64,7 @@ See [`crates/example`](crates/example) for a full implementation of a file assis
 
 ```toml
 [dependencies]
-polaris = { git = "https://github.com/TeamRadiantAI/polar-rs" }
+polaris = { git = "https://github.com/RadiantAILabs/polaris" }
 ```
 
 Requires **Rust 1.93.0+** (Edition 2024). Run `cargo make test` for the full test suite.
@@ -88,4 +88,4 @@ Architecture, design patterns, and API reference are available in the [docs](doc
 
 ## License
 
-Apache-2.0 — [Repository](https://github.com/TeamRadiantAI/polar-rs)
+Apache-2.0 — [Repository](https://github.com/RadiantAILabs/polaris)
