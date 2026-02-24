@@ -4,12 +4,14 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - "**/*.rs"
+      - "crates/**/*.rs"
+      - "examples/**/*.rs"
       - "**/Cargo.toml"
       - "Cargo.lock"
       - "Makefile.toml"
       - ".clippy.toml"
       - ".github/workflows/ci.yml"
+      - "**/*.md"
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,3 +35,6 @@ jobs:
 
       - name: Run tests
         run: cargo make test
+
+      - name: Check examples
+        run: cargo check --manifest-path examples/Cargo.toml

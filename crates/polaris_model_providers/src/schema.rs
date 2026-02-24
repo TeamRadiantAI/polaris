@@ -114,8 +114,45 @@ pub fn normalize_schema_for_strict_mode(mut schema: Value) -> Value {
             *items = normalize_schema_for_strict_mode(items.take());
         }
 
-        // Process allOf, anyOf, oneOf
-        for key in ["allOf", "anyOf", "oneOf"] {
+        // Convert oneOf with const values to enum
+        if let Some(Value::Array(one_of)) = obj.get("oneOf") {
+            // Check if all items are {const: "value"} patterns
+            let const_values: Vec<_> = one_of
+                .iter()
+                .filter_map(|item| {
+                    item.as_object()
+                        .and_then(|o| o.get("const"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .collect();
+
+            if const_values.len() == one_of.len() && !const_values.is_empty() {
+                // All items are const values - convert to enum
+                tracing::debug!(
+                    "Converting oneOf with const values to enum for Bedrock compatibility"
+                );
+                obj.remove("oneOf");
+                obj.insert("type".to_string(), Value::String("string".to_string()));
+                obj.insert(
+                    "enum".to_string(),
+                    Value::Array(const_values.into_iter().map(Value::String).collect()),
+                );
+            } else {
+                // Complex oneOf - recursively normalize but warn
+                tracing::warn!(
+                    "oneOf schema found but cannot be converted to enum (Bedrock may reject this)"
+                );
+                if let Some(Value::Array(arr)) = obj.get_mut("oneOf") {
+                    for item in arr.iter_mut() {
+                        *item = normalize_schema_for_strict_mode(item.take());
+                    }
+                }
+            }
+        }
+
+        // Process allOf, anyOf
+        for key in ["allOf", "anyOf"] {
             if let Some(Value::Array(arr)) = obj.get_mut(key) {
                 for item in arr.iter_mut() {
                     *item = normalize_schema_for_strict_mode(item.take());

@@ -1,2 +1,5 @@
 [net]
 git-fetch-with-cli = true
+
+[env]
+TRYBUILD = "overwrite"
