@@ -7,6 +7,7 @@
 //! | Provider | Feature Flag | Description |
 //! |----------|--------------|-------------|
 //! | Anthropic | `anthropic` (default) | Direct Anthropic API access |
+//! | `OpenAI` | `openai` | `OpenAI` Responses API |
 //! | AWS Bedrock | `bedrock` | AWS Bedrock Converse API |
 //!
 //! # Feature Flags
@@ -20,8 +21,11 @@
 //! # Enable only Bedrock
 //! polaris_model_providers = { path = "../polaris_model_providers", default-features = false, features = ["bedrock"] }
 //!
-//! # Enable both providers
-//! polaris_model_providers = { path = "../polaris_model_providers", features = ["bedrock"] }
+//! # Enable OpenAI
+//! polaris_model_providers = { path = "../polaris_model_providers", default-features = false, features = ["openai"] }
+//!
+//! # Enable multiple providers
+//! polaris_model_providers = { path = "../polaris_model_providers", features = ["openai", "bedrock"] }
 //! ```
 //!
 //! # Usage
@@ -49,6 +53,18 @@
 //! server.add_plugins(ModelsPlugin);
 //! server.add_plugins(BedrockPlugin::from_env());
 //! ```
+//!
+//! For `OpenAI`, provide an API key via environment variable:
+//!
+//! ```ignore
+//! use polaris_model_providers::OpenAiPlugin;
+//! use polaris_models::ModelsPlugin;
+//! use polaris_system::server::Server;
+//!
+//! let mut server = Server::new();
+//! server.add_plugins(ModelsPlugin);
+//! server.add_plugins(OpenAiPlugin::from_env("OPENAI_API_KEY"));
+//! ```
 
 mod schema;
 
@@ -57,6 +73,12 @@ pub mod anthropic;
 
 #[cfg(feature = "anthropic")]
 pub use anthropic::AnthropicPlugin;
+
+#[cfg(feature = "openai")]
+pub mod openai;
+
+#[cfg(feature = "openai")]
+pub use openai::OpenAiPlugin;
 
 #[cfg(feature = "bedrock")]
 pub mod bedrock;

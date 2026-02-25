@@ -7,6 +7,7 @@ keywords = []
 
 [features]
 default = []
+openai = ["polaris_model_providers/openai"]
 bedrock = ["polaris_model_providers/bedrock"]
 
 [dependencies]

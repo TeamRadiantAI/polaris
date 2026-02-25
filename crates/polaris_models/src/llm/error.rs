@@ -56,6 +56,10 @@ pub enum GenerationError {
     #[error("unsupported content: {0}")]
     UnsupportedContent(String),
 
+    /// The model refused to fulfill the request (e.g. content policy).
+    #[error("model refused the request: {0}")]
+    Refusal(String),
+
     /// Error returned by the model provider.
     #[error("provider error: {message}")]
     Provider {
