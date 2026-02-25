@@ -1,43 +1,32 @@
 # Examples
 
-## ReAct Agent
+## ReAct Agent CLI
 
-A file assistant that demonstrates the ReAct (Reasoning + Acting) pattern built with Polaris. See [agents.md](../docs/reference/agents.md) for the pattern specification.
+Interactive REPL demonstrating the ReAct (Reasoning + Acting) pattern. See [agents.md](../docs/reference/agents.md) for the pattern specification.
 
-### Tools
+### Features
 
-| Tool | Description |
-|------|-------------|
-| `list_files` | List files in a directory |
-| `read_file` | Read the contents of a file |
-| `write_file` | Write content to a file |
+- Multi-turn conversations with history
+- Session persistence across runs
+- File system tools (sandboxed to working directory)
 
-All paths are relative to the working directory, which acts as a sandbox. The agent cannot access files outside this directory.
+**Available tools:** `list_files`, `read_file`, `write_file`
 
 ### Running
 
 Run the following commands from the `examples/` directory:
 
 ```bash
-export ANTHROPIC_API_KEY=your-key
-
-# Run the agent
-cargo run --bin react -- <working_dir> <query>
+cargo run -p examples --bin cli -- <working_dir> [--session <id>]
 
 # Example
-cargo run -p examples --bin react -- ./sandbox "What files are here?"
+cargo run -p examples --bin cli -- ./sandbox
+cargo run -p examples --bin cli -- ./sandbox --session my-session
 ```
 
-## Sessions
+### Commands
 
-Demonstrates resource persistence across runs. Reuses the ReAct agent and adds a `SessionPlugin` that saves/loads conversation history to a JSON file.
-
-### Running
-
-```bash
-# First run — ask a question
-cargo run -p examples --bin sessions -- test1 ./sandbox "What files are here?"
-
-# Second run — conversation history is restored
-cargo run -p examples --bin sessions -- test1 ./sandbox "Which file did I ask about?"
-```
+- `/help` — Show available commands
+- `/history` — Show conversation history
+- `/clear` — Clear conversation history
+- `/exit` or `/quit` — Exit the REPL
