@@ -20,6 +20,7 @@ const SUPPORTED_FORMATS: &[&str] = &[
 ///
 /// This function:
 /// - Sets `additionalProperties: false` on all object types.
+/// - Ensures all property keys appear in `required`
 /// - Removes unsupported properties like `minimum`, `maximum`, `multipleOf`, etc.
 /// - Filters string formats to only supported values.
 /// - Removes `minItems` values greater than 1.
@@ -100,6 +101,12 @@ pub fn normalize_schema_for_strict_mode(mut schema: Value) -> Value {
 
         if is_object {
             obj.insert("additionalProperties".to_string(), Value::Bool(false));
+
+            // Ensure every property key in the `required` array.
+            if let Some(Value::Object(props)) = obj.get("properties") {
+                let all_keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
+                obj.insert("required".to_string(), Value::Array(all_keys));
+            }
         }
 
         // Recursively process nested schemas

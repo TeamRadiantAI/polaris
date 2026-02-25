@@ -10,6 +10,7 @@ workspace = true
 [features]
 default = ["anthropic"]
 anthropic = []
+openai = ["dep:async-openai"]
 bedrock = [
     "dep:aws-sdk-bedrockruntime",
     "dep:aws-config",
@@ -26,6 +27,13 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 reqwest = { version = "0.13.1", features = ["json"] }
 tracing = "0.1"
+
+# OpenAI dependencies
+async-openai = { version = "0.33", optional = true, default-features = false, features = [
+    "rustls",
+    "responses",
+    "response-types",
+] }
 
 # AWS Bedrock dependencies
 aws-sdk-bedrockruntime = { version = "1.124.0", optional = true }
