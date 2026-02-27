@@ -1,13 +1,8 @@
 //! Plugin system for extensible server functionality.
 //!
-//! Plugins are the fundamental unit of composition in Polaris. Every piece of
-//! functionality—from core infrastructure to agent-specific features—is delivered
-//! through plugins.
-//!
-//! # Philosophy
-//!
-//! **Everything is a plugin.** There is no "built-in" functionality that users
-//! cannot replace, extend, or disable. The server is just a plugin orchestrator.
+//! Plugins are the fundamental unit of composition in Polaris. In Polaris, every piece of
+//! functionality, from core infrastructure to agent-specific features, is
+//! delivered through plugins.
 //!
 //! # Example
 //!
@@ -130,10 +125,17 @@ impl PluginId {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// fn dependencies(&self) -> Vec<PluginId> {
-    ///     vec![PluginId::of::<TracingPlugin>()]
-    /// }
+    /// ```
+    /// # use polaris_system::plugin::{Plugin, PluginId, Version};
+    /// # use polaris_system::server::Server;
+    /// # struct TracingPlugin;
+    /// # impl Plugin for TracingPlugin {
+    /// #     const ID: &'static str = "tracing";
+    /// #     const VERSION: Version = Version::new(0,0,1);
+    /// #     fn build(&self, _: &mut Server) {}
+    /// # }
+    ///
+    /// PluginId::of::<TracingPlugin>();
     /// ```
     #[must_use]
     pub fn of<P: Plugin>() -> Self {
@@ -166,34 +168,26 @@ impl core::fmt::Display for PluginId {
 /// 3. **Tick Phase** - `update()` is called when schedules are triggered by Layer 2
 /// 4. **Cleanup Phase** - `cleanup()` is called in reverse dependency order
 ///
-/// # Scheduled Updates
-///
-/// Plugins can register for tick schedules defined by Layer 2. When Layer 2
-/// triggers a schedule (e.g., after agent execution), only plugins that
-/// registered for that schedule receive an `update()` call.
-///
-/// ```ignore
-/// // Layer 2 defines schedule marker types
-/// pub struct PostAgentRun;
-///
-/// impl Plugin for TracingPlugin {
-///     const ID: &'static str = "polaris::tracing";
-///     const VERSION: Version = Version::new(0, 0, 1);
-///     fn build(&self, server: &mut Server) { /* ... */ }
-///
-///     fn tick_schedules(&self) -> Vec<ScheduleId> {
-///         vec![ScheduleId::of::<PostAgentRun>()]
-///     }
-///
-///     fn update(&self, server: &mut Server, schedule: ScheduleId) {
-///         // Flush traces after each agent run
-///     }
-/// }
-/// ```
-///
 /// # Example
 ///
-/// ```ignore
+/// ```
+/// # use polaris_system::plugin::{Plugin, PluginId, Version};
+/// # use polaris_system::server::Server;
+/// # use polaris_system::resource::{Resource, GlobalResource};
+/// # use std::time::Duration;
+/// # struct MetricsCollector;
+/// # impl MetricsCollector {
+/// #     fn new(_: Duration) -> Self { Self }
+/// #     fn flush(&self) {}
+/// # }
+/// # struct GlobalConfig;
+/// # impl GlobalResource for GlobalConfig {}
+/// # struct TracingPlugin;
+/// # impl Plugin for TracingPlugin {
+/// #     const ID: &'static str = "tracing";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
 /// pub struct MetricsPlugin {
 ///     pub collect_interval: Duration,
 /// }
@@ -254,18 +248,11 @@ pub trait Plugin: Send + Sync + 'static {
     /// Called when a schedule this plugin registered for is triggered.
     ///
     /// The `schedule` parameter indicates which schedule triggered this update,
-    /// allowing plugins to handle different schedules differently.
+    /// allowing plugins to handle different schedules differently. Only called
+    /// if the plugin declared interest via [`tick_schedules()`](Self::tick_schedules).
     ///
-    /// Use this for:
-    /// - Periodic maintenance tasks
-    /// - Resource cleanup or rotation
-    /// - Health checks
-    /// - Flushing buffers
-    ///
-    /// # Note
-    ///
-    /// Most logic should be in systems, not here. Use sparingly.
-    /// Only called if the plugin declared interest via [`tick_schedules()`](Self::tick_schedules).
+    /// Most logic should live in systems, not here. Reserve `update()` for
+    /// plugin-level housekeeping (buffer flushing, health checks, etc.).
     fn update(&self, _server: &mut Server, _schedule: ScheduleId) {}
 
     /// Called when the server is shutting down.
@@ -285,12 +272,29 @@ pub trait Plugin: Send + Sync + 'static {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// fn tick_schedules(&self) -> Vec<ScheduleId> {
-    ///     vec![
-    ///         ScheduleId::of::<PostAgentRun>(),
-    ///         ScheduleId::of::<PostTurn>(),
-    ///     ]
+    /// ```
+    /// # use polaris_system::plugin::{Plugin, ScheduleId, Version};
+    /// # use polaris_system::server::Server;
+    /// # pub struct PostAgentRun;
+    /// # pub struct PreTurn;
+    /// struct MetricsPlugin;
+    ///
+    /// impl Plugin for MetricsPlugin {
+    ///     const ID: &'static str = "metrics";
+    ///     const VERSION: Version = Version::new(0, 0, 1);
+    ///
+    ///     fn build(&self, _: &mut Server) {}
+    ///
+    ///     fn tick_schedules(&self) -> Vec<ScheduleId> {
+    ///         vec![
+    ///             ScheduleId::of::<PostAgentRun>(),
+    ///             ScheduleId::of::<PreTurn>(),
+    ///         ]
+    ///     }
+    ///
+    ///     fn update(&self, _server: &mut Server, schedule: ScheduleId) {
+    ///         // Called when PostAgentRun or PreTurn schedules trigger
+    ///     }
     /// }
     /// ```
     fn tick_schedules(&self) -> Vec<ScheduleId> {
@@ -303,12 +307,27 @@ pub trait Plugin: Send + Sync + 'static {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// fn dependencies(&self) -> Vec<PluginId> {
-    ///     vec![
-    ///         PluginId::of::<TracingPlugin>(),
-    ///         PluginId::of::<IOPlugin>(),
-    ///     ]
+    /// ```
+    /// # use polaris_system::plugin::{Plugin, PluginId, Version};
+    /// # use polaris_system::server::Server;
+    /// struct TracingPlugin;
+    ///
+    /// impl Plugin for TracingPlugin {
+    ///     const ID: &'static str = "tracing";
+    ///     const VERSION: Version = Version::new(0, 0, 1);
+    ///     fn build(&self, _: &mut Server) {}
+    /// }
+    ///
+    /// struct IOPlugin;
+    ///
+    /// impl Plugin for IOPlugin {
+    ///     const ID: &'static str = "io";
+    ///     const VERSION: Version = Version::new(0, 0, 1);
+    ///     fn build(&self, _: &mut Server) {}
+    ///
+    ///     fn dependencies(&self) -> Vec<PluginId> {
+    ///         vec![PluginId::of::<TracingPlugin>()]
+    ///     }
     /// }
     /// ```
     fn dependencies(&self) -> Vec<PluginId> {
@@ -418,8 +437,29 @@ impl Plugins for PluginGroupBuilder {
 ///
 /// # Example
 ///
-/// ```ignore
-/// pub struct DefaultPlugins { /* ... */ }
+/// ```
+/// # use polaris_system::plugin::{Plugin, PluginGroup, PluginGroupBuilder, Version};
+/// # use polaris_system::server::Server;
+/// # struct CorePlugin;
+/// # impl Plugin for CorePlugin {
+/// #     const ID: &'static str = "core";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
+/// # struct TracingPlugin;
+/// # impl TracingPlugin { fn default() -> Self { Self } }
+/// # impl Plugin for TracingPlugin {
+/// #     const ID: &'static str = "tracing";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
+/// # struct IOPlugin;
+/// # impl Plugin for IOPlugin {
+/// #     const ID: &'static str = "io";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
+/// pub struct DefaultPlugins;
 ///
 /// impl PluginGroup for DefaultPlugins {
 ///     fn build(self) -> PluginGroupBuilder {
@@ -430,14 +470,12 @@ impl Plugins for PluginGroupBuilder {
 ///     }
 /// }
 ///
-/// // Use with customization (add replaces by type if already present)
 /// Server::new()
 ///     .add_plugins(
-///         DefaultPlugins::new()
+///         DefaultPlugins
 ///             .build()
-///             .add(TracingPlugin::default().with_level(Level::DEBUG))
 ///     )
-///     .run();
+///     .finish();
 /// ```
 pub trait PluginGroup {
     /// Returns the plugins in this group.
@@ -469,12 +507,33 @@ pub(crate) struct BoxedPlugin {
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Customize a plugin group
-/// DefaultPlugins::new()
+/// ```
+/// # use polaris_system::plugin::{Plugin, PluginGroup, PluginGroupBuilder, Version};
+/// # use polaris_system::server::Server;
+/// # struct TracingPlugin;
+/// # impl Plugin for TracingPlugin {
+/// #     const ID: &'static str = "tracing";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
+/// # struct MetricsPlugin;
+/// # impl Plugin for MetricsPlugin {
+/// #     const ID: &'static str = "metrics";
+/// #     const VERSION: Version = Version::new(0,0,1);
+/// #     fn build(&self, _: &mut Server) {}
+/// # }
+/// # struct DefaultPlugins;
+/// # impl PluginGroup for DefaultPlugins {
+/// #     fn build(self) -> PluginGroupBuilder {
+/// #         PluginGroupBuilder::new().add(TracingPlugin).add(MetricsPlugin)
+/// #     }
+/// # }
+/// // Disable a plugin from a group
+/// # let _ =
+/// DefaultPlugins
 ///     .build()
-///     .add(TracingPlugin::default().with_level(Level::DEBUG))  // replaces existing
-///     .add_after::<MetricsPlugin, IOPlugin>(MetricsPlugin)
+///     .disable::<TracingPlugin>()
+/// # ;
 /// ```
 #[derive(Default)]
 pub struct PluginGroupBuilder {

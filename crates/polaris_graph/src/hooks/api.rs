@@ -14,8 +14,11 @@
 //!
 //! Register hooks on multiple schedules using tuple syntax:
 //!
-//! ```ignore
-//! hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError)>(
+//! ```
+//! # use polaris_graph::hooks::{HooksAPI, GraphEvent};
+//! # use polaris_graph::hooks::schedule::{OnSystemStart, OnSystemComplete, OnSystemError};
+//! # let hooks = HooksAPI::new();
+//! hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError), _>(
 //!     "tracker",
 //!     |event: &GraphEvent| match event {
 //!         GraphEvent::SystemStart { system_name, .. } => println!("Start: {}", system_name),
@@ -24,29 +27,39 @@
 //!         _ => {}
 //!     },
 //! )?;
+//! # Ok::<(), polaris_graph::hooks::HookRegistrationError>(())
 //! ```
 //!
 //! # Example: Observer
 //!
-//! ```ignore
-//! hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
+//! ```
+//! # use polaris_graph::hooks::{HooksAPI, GraphEvent};
+//! # use polaris_graph::hooks::schedule::OnSystemStart;
+//! # let hooks = HooksAPI::new();
+//! hooks.register_observer::<OnSystemStart, _>("logger", |event: &GraphEvent| {
 //!     if let GraphEvent::SystemStart { system_name, .. } = event {
-//!         tracing::info!("System {} starting", system_name);
+//!         println!("System {} starting", system_name);
 //!     }
 //! })?;
+//! # Ok::<(), polaris_graph::hooks::HookRegistrationError>(())
 //! ```
 //!
 //! # Example: Provider
 //!
-//! ```ignore
-//! hooks.register_provider::<OnSystemStart, SystemInfo>("devtools", |event: &GraphEvent| {
+//! ```
+//! # use polaris_graph::hooks::{HooksAPI, GraphEvent};
+//! # use polaris_graph::hooks::schedule::OnSystemStart;
+//! # use polaris_graph::dev::SystemInfo;
+//! # let hooks = HooksAPI::new();
+//! hooks.register_provider::<OnSystemStart, SystemInfo, _>("devtools", |event: &GraphEvent| {
 //!     match event {
 //!         GraphEvent::SystemStart { node_id, system_name } => {
-//!             Some(SystemInfo::new(*node_id, system_name))
+//!             Some(SystemInfo::new(node_id.clone(), system_name))
 //!         }
 //!         _ => None,
 //!     }
 //! })?;
+//! # Ok::<(), polaris_graph::hooks::HookRegistrationError>(())
 //! ```
 
 use super::events::GraphEvent;
@@ -64,17 +77,15 @@ use std::sync::Arc;
 // BoxedHook
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Type-erased hook that receives `&GraphEvent` directly.
+/// Type-erased hook that receives [`GraphEvent`] directly.
 ///
-/// # Structure
+/// This is a lower-level type used internally by [`HooksAPI`]. Most users should
+/// use [`HooksAPI::register_observer`] or [`HooksAPI::register_provider`] instead.
 ///
-/// - `handler`: The hook function that receives context and event
-/// - `provided_resources`: Type IDs of resources this hook injects
+/// # Fields
 ///
-/// # Creating `BoxedHook`
-///
-/// Most users should use [`HooksAPI::register_observer`] or
-/// [`HooksAPI::register_provider`] instead of creating `BoxedHook` directly.
+/// - `handler`: The hook function that receives [`SystemContext`] and [`GraphEvent`]
+/// - `provided_resources`: Type IDs of resources this hook injects (empty for observers)
 pub struct BoxedHook {
     /// The hook function that receives context and event.
     /// With the current implementation, the hooks don't actually
@@ -86,7 +97,9 @@ pub struct BoxedHook {
 
 impl BoxedHook {
     /// Instantiates a new `BoxedHook` with the given handler and provided resources.
-    #[must_use]
+    ///
+    /// The returned hook must be registered via [`HooksAPI::register_boxed`] to take effect.
+    #[must_use = "BoxedHook must be registered via HooksAPI::register_boxed to take effect"]
     pub fn new(
         handler: impl Fn(&mut SystemContext<'_>, &GraphEvent) + Send + Sync + 'static,
         provided_resources: Vec<TypeId>,
@@ -199,21 +212,29 @@ impl HooksAPI {
     ///
     /// # Type Parameters
     ///
-    /// * `S` - Schedule marker type(s). Can be a single schedule or a tuple.
+    /// * `S` - Schedule marker type(s). Can be a single schedule or a tuple of schedules.
     /// * `F` - The hook function type (inferred)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HookRegistrationError::DuplicateName`] if a hook with the same name
+    /// is already registered on any of the target schedules.
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::hooks::{HooksAPI, GraphEvent};
+    /// # use polaris_graph::hooks::schedule::{OnSystemStart, OnSystemComplete, OnSystemError};
+    /// # let hooks = HooksAPI::new();
     /// // Single schedule
-    /// hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
+    /// hooks.register_observer::<OnSystemStart, _>("logger", |event: &GraphEvent| {
     ///     if let GraphEvent::SystemStart { system_name, .. } = event {
     ///         println!("System {} starting", system_name);
     ///     }
     /// })?;
     ///
     /// // Multiple schedules
-    /// hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError)>(
+    /// hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError), _>(
     ///     "tracker",
     ///     |event: &GraphEvent| match event {
     ///         GraphEvent::SystemStart { system_name, .. } => println!("Start: {}", system_name),
@@ -222,6 +243,7 @@ impl HooksAPI {
     ///         _ => {}
     ///     },
     /// )?;
+    /// # Ok::<(), polaris_graph::hooks::HookRegistrationError>(())
     /// ```
     pub fn register_observer<S, F>(
         &self,
@@ -259,32 +281,45 @@ impl HooksAPI {
         Ok(self)
     }
 
-    /// Registers a provider hook for a schedule.
+    /// Registers a provider hook for one or more schedules.
     ///
-    /// Providers produce resources that are inserted into the context, making
-    /// them available to systems. The provided resource type is tracked for
-    /// validation.
+    /// Providers produce resources that are inserted into the [`SystemContext`], making
+    /// them available to systems via [`polaris_system::param::Res`] or [`polaris_system::param::ResMut`].
+    /// The provided resource type is tracked for validation.
+    ///
+    /// If multiple providers on the same schedule produce the same resource type,
+    /// the last registered provider wins (last-write-wins semantics).
     ///
     /// # Type Parameters
     ///
-    /// * `S` - The schedule marker type (e.g., `OnSystemStart`)
-    /// * `T` - The resource type to provide
+    /// * `S` - Schedule marker type(s). Can be a single schedule or a tuple of schedules.
+    /// * `T` - The resource type to provide (must implement [`LocalResource`])
     /// * `F` - The hook function type (inferred)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HookRegistrationError::DuplicateName`] if a hook with the same name
+    /// is already registered on any of the target schedules.
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// hooks.register_provider::<OnSystemStart, SystemInfo>(
+    /// ```
+    /// # use polaris_graph::hooks::{HooksAPI, GraphEvent};
+    /// # use polaris_graph::hooks::schedule::OnSystemStart;
+    /// # use polaris_graph::dev::SystemInfo;
+    /// # let hooks = HooksAPI::new();
+    /// hooks.register_provider::<OnSystemStart, SystemInfo, _>(
     ///     "devtools",
     ///     |event: &GraphEvent| {
     ///         match event {
     ///             GraphEvent::SystemStart { node_id, system_name } => {
-    ///                 Some(SystemInfo::new(*node_id, system_name))
+    ///                 Some(SystemInfo::new(node_id.clone(), system_name))
     ///             }
     ///             _ => None,
     ///         }
     ///     },
     /// )?;
+    /// # Ok::<(), polaris_graph::hooks::HookRegistrationError>(())
     /// ```
     pub fn register_provider<S, T, F>(
         &self,
@@ -327,9 +362,16 @@ impl HooksAPI {
 
     /// Registers a pre-built [`BoxedHook`] for the given schedule.
     ///
-    /// This is the lower-level registration method used by both
+    /// This is the lower-level registration method used internally by
     /// [`register_observer`](Self::register_observer) and
     /// [`register_provider`](Self::register_provider).
+    ///
+    /// Most users should use those higher-level methods instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HookRegistrationError::DuplicateName`] if a hook with the same name
+    /// is already registered on the target schedule.
     pub fn register_boxed(
         &self,
         schedule: ScheduleId,
@@ -352,7 +394,10 @@ impl HooksAPI {
 
     /// Invokes all hooks registered for the given schedule with the event data.
     ///
-    /// Hooks execute in registration order; for same-resource writes, last-write-wins.
+    /// Hooks execute in registration order. For provider hooks that insert the same
+    /// resource type, last-write-wins semantics apply.
+    ///
+    /// If no hooks are registered for the schedule, this is a no-op.
     pub fn invoke(&self, schedule: ScheduleId, ctx: &mut SystemContext<'_>, event: &GraphEvent) {
         let hooks = self.hooks.read();
 

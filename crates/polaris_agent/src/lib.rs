@@ -55,9 +55,14 @@ use polaris_graph::graph::Graph;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_agent::{Agent, AgentExt};
 /// use polaris_graph::Graph;
+/// use polaris_system::system;
+///
+/// # async fn reason() {}
+/// # async fn decide() {}
+/// # async fn respond() {}
 ///
 /// struct SimpleAgent {
 ///     max_iterations: usize,
@@ -67,15 +72,12 @@ use polaris_graph::graph::Graph;
 ///     fn build(&self, graph: &mut Graph) {
 ///         graph
 ///             .add_system(reason)
-///             .add_conditional_branch(
-///                 "needs_tool",
-///                 |g| g.add_system(invoke_tool),
-///                 |g| g.add_system(respond),
-///             );
+///             .add_system(decide)
+///             .add_system(respond);
 ///     }
 ///
 ///     fn name(&self) -> &str {
-///         "SimpleAgent"
+///        "SimpleAgent"
 ///     }
 /// }
 /// ```

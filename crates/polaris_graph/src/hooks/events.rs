@@ -4,7 +4,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_graph::hooks::events::GraphEvent;
 //!
 //! fn handle_event(event: &GraphEvent) {

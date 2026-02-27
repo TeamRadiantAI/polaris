@@ -21,23 +21,34 @@
 //! register it via [`Server::register_local`] with a factory that captures their
 //! [`IOProvider`] implementation:
 //!
-//! ```ignore
-//! // In a concrete plugin's build():
-//! let provider = Arc::new(MyProvider::new());
-//! server.register_local(move || UserIO::new(provider.clone()));
 //! ```
+//! # use std::sync::Arc;
+//! # use polaris_system::server::Server;
+//! # use polaris_system::plugin::{Plugin, PluginId, Version};
+//! # use polaris_core_plugins::{ServerInfoPlugin, IOPlugin, IOProvider, IOMessage, IOError, UserIO};
 //!
-//! # Example
+//! struct TerminalProvider;
 //!
-//! ```no_run
-//! use polaris_system::server::Server;
-//! use polaris_core_plugins::{ServerInfoPlugin, IOPlugin};
+//! impl IOProvider for TerminalProvider {
+//!     async fn send(&self, _message: IOMessage) -> Result<(), IOError> {
+//!         Ok(()) // write to stdout
+//!     }
+//!     async fn receive(&self) -> Result<IOMessage, IOError> {
+//!         Ok(IOMessage::user_text("input")) // read from stdin
+//!     }
+//! }
 //!
-//! let mut server = Server::new();
-//! server.add_plugins(ServerInfoPlugin);
-//! server.add_plugins(IOPlugin);
-//! // Concrete communication plugin would register UserIO:
-//! // .add_plugins(TerminalIOPlugin::new())
+//! struct TerminalIOPlugin;
+//!
+//! impl Plugin for TerminalIOPlugin {
+//!     const ID: &'static str = "myapp::terminal_io";
+//!     const VERSION: Version = Version::new(0, 1, 0);
+//!
+//!     fn build(&self, server: &mut Server) {
+//!         let provider = Arc::new(TerminalProvider);
+//!         server.register_local(move || UserIO::new(provider.clone()));
+//!     }
+//! }
 //! ```
 
 use crate::ServerInfoPlugin;
@@ -194,7 +205,7 @@ impl IOMessage {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use polaris_core_plugins::{IOProvider, IOMessage, IOError};
 ///
 /// struct TerminalProvider;
@@ -276,29 +287,23 @@ impl<T: IOProvider> ErasedProvider for T {
 ///
 /// Registered by concrete communication plugins (not by [`IOPlugin`] itself)
 /// using [`Server::register_local`] with a factory that captures a shared
-/// provider:
-///
-/// ```ignore
-/// // In a concrete communication plugin's build():
-/// let provider = Arc::new(MyProvider::new());
-/// server.register_local(move || UserIO::new(provider.clone()));
-/// ```
+/// provider. See the [module-level documentation](self) for a full example.
 ///
 /// # Example
 ///
-/// ```ignore
-/// use polaris_system::param::Res;
-/// use polaris_core_plugins::{UserIO, IOMessage, IOContent};
-/// use system_macros::system;
+/// ```
+/// # use polaris_system::param::Res;
+/// # use polaris_system::system;
+/// # use polaris_core_plugins::{UserIO, IOMessage};
 ///
 /// #[system]
-/// async fn respond_to_user(user_io: Res<UserIO>) {
+/// async fn respond_to_user(user_io: Res<'_, UserIO>) {
 ///     let msg = IOMessage::system_text("Hello from the agent!");
 ///     user_io.send(msg).await.expect("send failed");
 /// }
 ///
 /// #[system]
-/// async fn wait_for_input(user_io: Res<UserIO>) -> IOMessage {
+/// async fn wait_for_input(user_io: Res<'_, UserIO>) -> IOMessage {
 ///     // Suspends graph execution until user responds
 ///     user_io.receive().await.expect("receive failed")
 /// }
@@ -352,15 +357,16 @@ impl UserIO {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::param::ResMut;
+/// use polaris_system::system;
 /// use polaris_core_plugins::{InputBuffer, IOMessage};
-/// use system_macros::system;
 ///
 /// #[system]
-/// async fn process_inputs(mut input: ResMut<InputBuffer>) {
+/// async fn process_inputs(mut input: ResMut<'_, InputBuffer>) {
 ///     for msg in input.drain() {
 ///         // Process each buffered message
+///         # let _ = msg;
 ///     }
 /// }
 /// ```
@@ -425,13 +431,13 @@ impl Default for InputBuffer {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::param::ResMut;
+/// use polaris_system::system;
 /// use polaris_core_plugins::{OutputBuffer, IOMessage, IOContent};
-/// use system_macros::system;
 ///
 /// #[system]
-/// async fn prepare_response(mut output: ResMut<OutputBuffer>) {
+/// async fn prepare_response(mut output: ResMut<'_, OutputBuffer>) {
 ///     output.push(IOMessage::system_text("Processing complete."));
 /// }
 /// ```
@@ -544,10 +550,13 @@ impl Plugin for IOPlugin {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
+/// # #[cfg(any(test, feature = "test-utils"))]
+/// # {
 /// use std::sync::Arc;
 /// use polaris_core_plugins::{MockIOProvider, IOMessage, UserIO};
 ///
+/// # tokio_test::block_on(async {
 /// let mock = Arc::new(MockIOProvider::new());
 /// mock.enqueue_receive(IOMessage::user_text("test input"));
 ///
@@ -560,6 +569,8 @@ impl Plugin for IOPlugin {
 /// user_io.send(IOMessage::system_text("response")).await.unwrap();
 /// let sent = mock.take_sent();
 /// assert_eq!(sent.len(), 1);
+/// # });
+/// # }
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
 pub struct MockIOProvider {

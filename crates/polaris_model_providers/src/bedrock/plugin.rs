@@ -12,16 +12,24 @@ use std::sync::Arc;
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```no_run
+/// # #[cfg(feature = "bedrock")]
+/// # {
+/// # use polaris_model_providers::BedrockPlugin;
+/// # let mut server = polaris_system::server::Server::new();
+///
 /// // Using default AWS credential chain
 /// server.add_plugins(BedrockPlugin::from_env());
 ///
 /// // With custom SDK config
+/// # tokio::runtime::Runtime::new().unwrap().block_on(async {
 /// let sdk_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
 ///     .region("us-west-2")
 ///     .load()
 ///     .await;
 /// server.add_plugins(BedrockPlugin::from_sdk_config(sdk_config));
+/// # });
+/// }
 /// ```
 pub struct BedrockPlugin {
     sdk_config: Option<aws_config::SdkConfig>,

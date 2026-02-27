@@ -1,117 +1,63 @@
 //! API trait for capability registration.
 //!
-//! APIs are build-time registries that plugins use to expose capabilities
-//! to other plugins. Unlike Resources (accessed by systems during execution),
-//! APIs are accessed by plugins during the build/ready phases.
-//!
-//! # API vs Resource
-//!
-//! | Aspect | API | Resource |
-//! |--------|-----|----------|
-//! | **Purpose** | Plugin orchestration | System execution |
-//! | **Accessed by** | Plugins | Systems |
-//! | **Access method** | `server.api::<A>()` | `Res<T>`, `ResMut<T>` |
-//! | **Lifetime** | Server lifetime | Global or per-context |
-//! | **Phase** | Build/Ready | Execution |
-//!
-//! # When to Use API
-//!
-//! - Registering agent types
-//! - Managing sessions and groups
-//! - Plugin capability discovery
-//! - Build-time configuration
-//!
-//! # When to Use Resource
-//!
-//! - Runtime state for systems
-//! - Agent memory, scratchpad
-//! - Configuration read by systems
-//! - Tool registries accessed during execution
-//!
-//! # Example
-//!
-//! ```ignore
-//! use std::sync::RwLock;
-//! use hashbrown::HashMap;
-//! use polaris_system::api::API;
-//!
-//! /// Registry for agent types.
-//! pub struct AgentAPI {
-//!     agents: RwLock<HashMap<String, Box<dyn Agent>>>,
-//! }
-//!
-//! impl API for AgentAPI {}
-//!
-//! impl AgentAPI {
-//!     pub fn new() -> Self {
-//!         Self { agents: RwLock::new(HashMap::new()) }
-//!     }
-//!
-//!     pub fn register(&self, name: impl Into<String>, agent: impl Agent) {
-//!         self.agents.write().unwrap()
-//!             .insert(name.into(), Box::new(agent));
-//!     }
-//! }
-//! ```
-//!
-//! # Interior Mutability Pattern
-//!
-//! APIs that need registration typically use interior mutability:
-//!
-//! ```ignore
-//! pub struct MyAPI {
-//!     data: RwLock<HashMap<String, Value>>,
-//! }
-//!
-//! impl API for MyAPI {}
-//!
-//! impl MyAPI {
-//!     pub fn register(&self, key: &str, value: Value) {
-//!         self.data.write().unwrap().insert(key.into(), value);
-//!     }
-//!
-//!     pub fn get(&self, key: &str) -> Option<Value> {
-//!         self.data.read().unwrap().get(key).cloned()
-//!     }
-//! }
-//! ```
-//!
-//! This allows:
-//! - `server.api::<MyAPI>()` returns `&MyAPI`
-//! - Multiple plugins can call `register()` concurrently
-//! - Thread-safe access without `&mut Server`
+//! An [`API`] is a build-time registry that plugins use to expose
+//! capabilities to other plugins. APIs are accessed by plugins during
+//! server setup via [`Server::api()`](crate::server::Server::api), unlike
+//! [resources](crate::resource) which are accessed by systems at execution
+//! time. See [`API`] for usage examples.
 
 /// Marker trait for capability APIs.
 ///
-/// APIs are build-time registries that plugins use to expose
-/// capabilities to other plugins. They are NOT accessed by systems.
+/// APIs are build-time registries that plugins use to expose capabilities
+/// to other plugins. They are accessed via
+/// [`Server::api`](crate::server::Server::api) during the build and ready
+/// phases, not by systems during execution.
 ///
-/// # Implementing API
+/// Since `server.api::<T>()` returns `&T`, APIs that need mutable
+/// registration typically use interior mutability (e.g. `RwLock`).
 ///
-/// Implement this marker trait for your type:
+/// # Example
 ///
-/// ```ignore
-/// use polaris_system::api::API;
+/// A provider plugin inserts the API during `build`; consumer plugins
+/// access it during `ready`:
 ///
-/// pub struct MyAPI { /* ... */ }
-///
-/// impl API for MyAPI {}
 /// ```
+/// use polaris_system::api::API;
+/// use polaris_system::plugin::{Plugin, PluginId, Version};
+/// use polaris_system::server::Server;
 ///
-/// # Usage in Plugins
+/// struct MyAPI;
+/// impl API for MyAPI {}
 ///
-/// ```ignore
+/// impl MyAPI { fn new() -> Self { MyAPI } fn register(&self, _: &str, _: i32) {} }
+///
+/// struct MyAPIPlugin;
+///
 /// impl Plugin for MyAPIPlugin {
+///     const ID: &'static str = "my_api";
+///     const VERSION: Version = Version::new(0, 0, 1);
+///
 ///     fn build(&self, server: &mut Server) {
 ///         server.insert_api(MyAPI::new());
 ///     }
 /// }
 ///
+/// struct ConsumerPlugin;
+///
 /// impl Plugin for ConsumerPlugin {
+///     const ID: &'static str = "consumer";
+///     const VERSION: Version = Version::new(0, 0, 1);
+///
+///     fn dependencies(&self) -> Vec<PluginId> {
+///         vec![PluginId::of::<MyAPIPlugin>()]
+///     }
+///
+///     fn build(&self, _server: &mut Server) {}
+///
 ///     fn ready(&self, server: &mut Server) {
 ///         let api = server.api::<MyAPI>()
 ///             .expect("MyAPI required");
-///         api.register("key", value);
+///         api.register("key", 42);
 ///     }
 /// }
 /// ```

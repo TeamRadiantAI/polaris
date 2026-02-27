@@ -8,7 +8,11 @@ use std::sync::Arc;
 
 /// Plugin providing support for Anthropic models.
 ///
-/// ```ignore
+/// ```no_run
+/// # use polaris_model_providers::anthropic::AnthropicPlugin;
+/// # use polaris_system::server::Server;
+/// # let mut server = Server::new();
+///
 /// server.add_plugins(AnthropicPlugin::from_env("ANTHROPIC_API_KEY"));
 /// ```
 pub struct AnthropicPlugin {

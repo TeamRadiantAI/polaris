@@ -24,15 +24,21 @@ use polaris_system::system::IntoSystem;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
+/// # use polaris_graph::Graph;
+/// # async fn reason() -> i32 { 1 }
+/// # async fn decide() -> i32 { 2 }
+/// # async fn invoke_tool() -> i32 { 3 }
+/// # async fn respond() -> i32 { 4 }
 /// let mut graph = Graph::new();
 /// graph
 ///     .add_system(reason)
 ///     .add_system(decide)
-///     .add_conditional_branch(
+///     .add_conditional_branch::<i32, _, _, _>(
 ///         "use_tool",
-///         |g| g.add_system(invoke_tool),
-///         |g| g.add_system(respond),
+///         |_| true,
+///         |g| { g.add_system(invoke_tool); },
+///         |g| { g.add_system(respond); },
 ///     );
 /// ```
 #[derive(Debug, Default)]
@@ -128,7 +134,8 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
     /// async fn my_system() -> i32 { 42 }
     ///
     /// let mut graph = Graph::new();
@@ -164,7 +171,8 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
     /// async fn step_a() -> i32 { 1 }
     /// async fn step_b() -> i32 { 2 }
     ///
@@ -231,12 +239,18 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # #[derive(PartialEq)] enum Action { UseTool }
+    /// # struct ReasoningResult { action: Action }
+    /// # async fn use_tool() -> i32 { 1 }
+    /// # async fn respond() -> i32 { 2 }
+    /// # let mut graph = Graph::new();
     /// graph.add_conditional_branch::<ReasoningResult, _, _, _>(
     ///     "needs_tool",
     ///     |result| result.action == Action::UseTool,
-    ///     |g| g.add_system(use_tool),
-    ///     |g| g.add_system(respond),
+    ///     |g| { g.add_system(use_tool); },
+    ///     |g| { g.add_system(respond); },
     /// );
     /// ```
     pub fn add_conditional_branch<T, P, F1, F2>(
@@ -371,7 +385,13 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # struct LoopState { is_done: bool, iterations: usize }
+    /// # async fn reason() -> LoopState { LoopState { is_done: false, iterations: 0 } }
+    /// # async fn act() -> i32 { 1 }
+    /// # async fn observe() -> i32 { 2 }
+    /// # let mut graph = Graph::new();
     /// graph.add_loop::<LoopState, _, _>(
     ///     "react_loop",
     ///     |state| state.is_done || state.iterations >= 10,
@@ -436,7 +456,10 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # async fn attempt_operation() -> i32 { 1 }
+    /// # let mut graph = Graph::new();
     /// graph.add_loop_n("retry_loop", 3, |g| {
     ///     g.add_system(attempt_operation);
     /// });
@@ -491,7 +514,11 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # async fn risky_operation() -> Result<i32, String> { Ok(1) }
+    /// # async fn fallback_operation() -> i32 { 2 }
+    /// # let mut graph = Graph::new();
     /// let risky_id = graph.add_system_node(risky_operation);
     /// graph.add_error_handler(risky_id, |g| {
     ///     g.add_system(fallback_operation);
@@ -534,9 +561,14 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # use core::time::Duration;
+    /// # async fn slow_operation() -> i32 { 1 }
+    /// # async fn fallback_operation() -> i32 { 2 }
+    /// # let mut graph = Graph::new();
     /// let slow_id = graph.add_system_node(slow_operation);
-    /// graph.set_timeout(slow_id, Duration::from_secs(5));
+    /// graph.set_timeout(slow_id.clone(), Duration::from_secs(5));
     /// graph.add_timeout_handler(slow_id, |g| {
     ///     g.add_system(fallback_operation);
     /// });
@@ -574,7 +606,11 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # use core::time::Duration;
+    /// # async fn slow_operation() -> i32 { 1 }
+    /// # let mut graph = Graph::new();
     /// let id = graph.add_system_node(slow_operation);
     /// graph.set_timeout(id, Duration::from_secs(5));
     /// ```
@@ -616,17 +652,21 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// struct RouterOutput { action: &'static str }
-    ///
-    /// graph.add_switch::<RouterOutput, _, _>(
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # struct RouterOutput { action: &'static str }
+    /// # async fn use_tool() -> i32 { 1 }
+    /// # async fn respond() -> i32 { 2 }
+    /// # async fn handle_unknown() -> i32 { 3 }
+    /// # let mut graph = Graph::new();
+    /// graph.add_switch::<RouterOutput, _, _, _>(
     ///     "route_action",
     ///     |output| output.action,
     ///     vec![
-    ///         ("tool", |g| { g.add_system(use_tool); }),
-    ///         ("respond", |g| { g.add_system(respond); }),
+    ///         ("tool", Box::new(|g: &mut Graph| { g.add_system(use_tool); }) as Box<dyn FnOnce(&mut Graph)>),
+    ///         ("respond", Box::new(|g: &mut Graph| { g.add_system(respond); }) as Box<dyn FnOnce(&mut Graph)>),
     ///     ],
-    ///     Some(|g| { g.add_system(handle_unknown); }),
+    ///     Some(Box::new(|g: &mut Graph| { g.add_system(handle_unknown); })),
     /// );
     /// ```
     pub fn add_switch<T, D, C, F>(
@@ -821,20 +861,21 @@ impl Graph {
     ///
     /// # Example
     ///
-    /// ```ignore
-    ///
+    /// ```
+    /// # use polaris_graph::Graph;
+    /// # async fn my_system() -> i32 { 1 }
     /// let mut graph = Graph::new();
     /// graph.add_system(my_system);
     ///
     /// match graph.validate() {
     ///     Ok(warnings) => {
-    ///         for w in &warnings {
-    ///             tracing::warn!(%w, "graph validation warning");
+    ///         for _w in &warnings {
+    ///             // handle validation warnings (e.g. overlapping parallel outputs)
     ///         }
     ///     }
     ///     Err(errors) => {
-    ///         for err in &errors {
-    ///             tracing::error!(%err, "graph validation error");
+    ///         for _err in &errors {
+    ///             // handle validation errors that would cause runtime failures
     ///         }
     ///     }
     /// }

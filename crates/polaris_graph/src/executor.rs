@@ -5,17 +5,23 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
+//! # async fn example_fn() -> Result<(), Box<dyn std::error::Error>> {
 //! use polaris_graph::{Graph, GraphExecutor};
 //! use polaris_system::param::SystemContext;
 //!
-//! let graph = Graph::new()
-//!     .add_system(reason)
-//!     .add_system(act);
+//! async fn reason() -> i32 { 1 }
+//! async fn act() -> i32 { 2 }
 //!
-//! let ctx = SystemContext::new();
+//! let mut graph = Graph::new();
+//! graph.add_system(reason).add_system(act);
+//!
+//! let mut ctx = SystemContext::new();
 //! let executor = GraphExecutor::new();
-//! let result = executor.execute(&graph, &ctx, None).await?;
+//! let result = executor.execute(&graph, &mut ctx, None).await?;
+//!
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::edge::Edge;
@@ -301,25 +307,6 @@ impl GraphExecutor {
     ///   and `OnSystemStart` are considered available.
     /// - **Outputs** (`Out<T>`): Currently not validated, as outputs are
     ///   produced dynamically during execution.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let executor = GraphExecutor::new();
-    /// let mut ctx = server.create_context();
-    /// let hooks = server.api::<HooksAPI>();
-    ///
-    /// // Validate before executing
-    /// if let Err(errors) = executor.validate_resources(&graph, &ctx, hooks) {
-    ///     for error in &errors {
-    ///         eprintln!("Validation error: {error}");
-    ///     }
-    ///     return Err(errors);
-    /// }
-    ///
-    /// // Safe to execute - all resources are available
-    /// let result = executor.execute(&graph, &mut ctx, hooks).await?;
-    /// ```
     ///
     /// # Returns
     ///

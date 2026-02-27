@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use std::time::Duration;
 //! use polaris_system::server::Server;
 //! use polaris_system::param::{Res, ResMut};
@@ -52,7 +52,7 @@ use std::time::{Duration, Instant};
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use std::time::Instant;
 /// use polaris_core_plugins::ClockProvider;
 ///
@@ -99,7 +99,7 @@ impl ClockProvider for SystemClock {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use std::time::Instant;
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
@@ -171,7 +171,7 @@ impl Default for Clock {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::param::ResMut;
 /// use polaris_system::system;
 /// use polaris_core_plugins::Stopwatch;
@@ -264,7 +264,7 @@ impl Default for Stopwatch {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::server::Server;
 /// use polaris_system::param::{Res, ResMut};
 /// use polaris_system::system;
@@ -291,11 +291,13 @@ impl Default for Stopwatch {
 ///
 /// Use [`TimePlugin::with_clock`] to inject a mock clock for deterministic tests:
 ///
-/// ```ignore
+/// ```
+/// # #[cfg(feature = "test-utils")]
+/// # {
 /// use std::sync::Arc;
 /// use std::time::{Duration, Instant};
 /// use polaris_system::server::Server;
-/// use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, Clock};
+/// use polaris_core_plugins::{ServerInfoPlugin, TimePlugin, Clock, MockClock};
 ///
 /// // Create a mock clock
 /// let mock = Arc::new(MockClock::new(Instant::now()));
@@ -313,6 +315,7 @@ impl Default for Stopwatch {
 /// let ctx = server.create_context();
 /// let clock = ctx.get_resource::<Clock>().unwrap();
 /// // clock.now() is now 60 seconds ahead
+/// # }
 /// ```
 #[derive(Clone, Default)]
 pub struct TimePlugin {
@@ -333,12 +336,16 @@ impl TimePlugin {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # #[cfg(feature = "test-utils")]
+    /// # {
     /// use std::sync::Arc;
+    /// use std::time::Instant;
     /// use polaris_core_plugins::{TimePlugin, MockClock};
     ///
     /// let mock = Arc::new(MockClock::new(Instant::now()));
     /// let plugin = TimePlugin::with_clock(mock);
+    /// # }
     /// ```
     #[must_use]
     pub fn with_clock(clock: Arc<dyn ClockProvider>) -> Self {
@@ -375,7 +382,9 @@ impl Plugin for TimePlugin {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
+/// # #[cfg(feature = "test-utils")]
+/// # {
 /// use std::sync::Arc;
 /// use std::time::{Duration, Instant};
 /// use polaris_core_plugins::{TimePlugin, MockClock};
@@ -385,6 +394,7 @@ impl Plugin for TimePlugin {
 ///
 /// // Later, advance time
 /// mock.advance(Duration::from_secs(60));
+/// # }
 /// ```
 #[cfg(any(test, feature = "test-utils"))]
 pub struct MockClock {

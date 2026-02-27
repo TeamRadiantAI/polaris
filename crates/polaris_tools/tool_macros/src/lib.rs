@@ -21,8 +21,8 @@ use proc_macro::TokenStream;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use polaris_tools::tool;
+/// ```
+/// use polaris_tools::{tool, ToolError};
 ///
 /// #[tool]
 /// /// Search for documents.
@@ -35,8 +35,6 @@ use proc_macro::TokenStream;
 /// ) -> Result<String, ToolError> {
 ///     Ok(format!("Results for: {query}"))
 /// }
-///
-/// // Use: registry.register(search());
 /// ```
 #[proc_macro_attribute]
 pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -51,8 +49,8 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Example
 ///
-/// ```ignore
-/// use polaris_tools::{toolset, tool};
+/// ```
+/// use polaris_tools::{toolset, tool, ToolError};
 ///
 /// struct FileTools;
 ///
@@ -70,8 +68,6 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///         Ok("contents".to_string())
 ///     }
 /// }
-///
-/// // Use: registry.register_toolset(FileTools);
 /// ```
 #[proc_macro_attribute]
 pub fn toolset(_attr: TokenStream, item: TokenStream) -> TokenStream {

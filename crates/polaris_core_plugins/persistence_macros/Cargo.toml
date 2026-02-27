@@ -17,3 +17,7 @@ syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
 darling = "0.23"
+
+[dev-dependencies]
+polaris_core_plugins = { path = ".." }
+serde = { version = "1", features = ["derive"] }

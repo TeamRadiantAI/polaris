@@ -20,6 +20,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 tokio = { version = "1.43", features = ["rt", "sync", "macros"] }
+tokio-test = "0.4"
 
 [features]
 default = []

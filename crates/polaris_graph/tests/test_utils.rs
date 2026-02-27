@@ -44,7 +44,12 @@ pub fn get_hooks(server: &Server) -> Option<&HooksAPI> {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
+/// # use polaris_graph::Graph;
+/// # use polaris_graph_test_utils::branch;
+/// # async fn system_a() -> i32 { 1 }
+/// # async fn system_b() -> i32 { 2 }
+/// # let mut graph = Graph::new();
 /// graph.add_parallel("par", [
 ///     branch(|g| g.add_system(system_a)),
 ///     branch(|g| g.add_system(system_b)),

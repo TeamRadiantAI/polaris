@@ -4,7 +4,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_system::server::Server;
 //! use polaris_system::param::Res;
 //! use polaris_system::system;
@@ -46,7 +46,7 @@ use polaris_system::server::Server;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
 /// use polaris_core_plugins::ServerInfo;
@@ -100,7 +100,7 @@ impl Default for ServerInfo {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::server::Server;
 /// use polaris_system::param::Res;
 /// use polaris_system::system;

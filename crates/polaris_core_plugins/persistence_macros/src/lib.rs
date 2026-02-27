@@ -16,16 +16,16 @@ use proc_macro::TokenStream;
 /// # Attributes
 ///
 /// - `key` (required): The stable storage key for this resource.
-/// - `version` (optional): The schema version. Defaults to `"1.0.0"`.
+/// - `schema_version` (optional): The schema version. Defaults to `"1.0.0"`.
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use serde::{Serialize, Deserialize};
-/// use polaris_core_plugins::persistence::{Storable};
+/// use polaris_core_plugins::persistence::Storable;
 ///
 /// #[derive(Serialize, Deserialize, Storable)]
-/// #[storable(key = "ConversationMemory", version = "2.0.0")]
+/// #[storable(key = "ConversationMemory", schema_version = "2.0.0")]
 /// struct ConversationMemory {
 ///     messages: Vec<String>,
 /// }

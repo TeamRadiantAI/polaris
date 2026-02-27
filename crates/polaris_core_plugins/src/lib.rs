@@ -15,7 +15,7 @@
 //!
 //! # Example
 //!
-//! ```no_run
+//! ```
 //! use polaris_system::server::Server;
 //! use polaris_system::plugin::PluginGroup;
 //! use polaris_core_plugins::DefaultPlugins;
@@ -96,7 +96,7 @@ use tracing::Level;
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use polaris_system::server::Server;
 /// use polaris_system::plugin::PluginGroup;
 /// use polaris_core_plugins::DefaultPlugins;
@@ -129,7 +129,11 @@ use tracing::Level;
 ///
 /// Or disable a plugin entirely:
 ///
-/// ```ignore
+/// ```
+/// use polaris_system::server::Server;
+/// use polaris_system::plugin::PluginGroup;
+/// use polaris_core_plugins::{DefaultPlugins, TracingPlugin};
+///
 /// Server::new()
 ///     .add_plugins(
 ///         DefaultPlugins::new()
@@ -232,7 +236,7 @@ impl PluginGroup for DefaultPlugins {
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use polaris_system::server::Server;
 /// use polaris_system::plugin::PluginGroup;
 /// use polaris_core_plugins::MinimalPlugins;

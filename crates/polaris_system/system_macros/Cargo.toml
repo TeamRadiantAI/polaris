@@ -16,3 +16,6 @@ polaris_macro_utils = { path = "../../polaris_macro_utils", version = "0.0.1" }
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
+
+[dev-dependencies]
+polaris_system = { path = ".." }

@@ -19,8 +19,30 @@ use std::sync::Arc;
 /// is available as a mutable resource during this phase and becomes an immutable global
 /// after the `ready()` phase.
 ///
-/// ```ignore
+/// ```
+/// # use polaris_system::plugin::{Plugin, PluginId, Version};
+/// # use polaris_system::server::Server;
+/// # use polaris_models::{ModelRegistry, ModelsPlugin};
+/// # use polaris_models::llm::{LlmProvider, GenerationRequest, GenerationResponse, GenerationError};
+/// # use async_trait::async_trait;
+/// # use std::sync::Arc;
+///
+/// # struct MyProviderPlugin;
+/// # struct MyProvider;
+///
+/// # impl MyProvider { fn new() -> Self { MyProvider } }
+///
+/// # #[async_trait]
+/// # impl LlmProvider for MyProvider {
+/// #   async fn generate(&self, _model: &str, _request: GenerationRequest) -> Result<GenerationResponse, GenerationError> {
+/// #     unimplemented!()
+/// #   }
+/// # }
+///
 /// impl Plugin for MyProviderPlugin {
+///    const ID: &'static str = "my_provider";
+///    const VERSION: Version = Version::new(0, 0, 1);
+///
 ///     fn dependencies(&self) -> Vec<PluginId> {
 ///         vec![PluginId::of::<ModelsPlugin>()]
 ///     }

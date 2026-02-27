@@ -10,21 +10,6 @@
 //! Schedule markers are pure marker types implementing the [`Schedule`] trait.
 //! Event data is provided via the unified [`GraphEvent`](super::events::GraphEvent)
 //! enum, which all hooks receive.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use polaris_graph::hooks::schedule::OnSystemStart;
-//! use polaris_graph::hooks::events::GraphEvent;
-//! use polaris_system::plugin::ScheduleId;
-//!
-//! // Using type-safe registration (preferred)
-//! hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
-//!     if let GraphEvent::SystemStart { system_name, .. } = event {
-//!         tracing::info!("System {} starting", system_name);
-//!     }
-//! })?;
-//! ```
 
 use polaris_system::plugin::Schedule;
 

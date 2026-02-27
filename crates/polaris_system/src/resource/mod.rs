@@ -17,14 +17,18 @@
 //! | Global | [`GlobalResource`] | Server | Read-only (`Res<T>`) |
 //! | Local | [`LocalResource`] | Per-context | Mutable (`ResMut<T>`) |
 //!
-//! Global resources are shared across all execution contexts (agents, sessions).
-//! Local resources are isolated per-context, enabling safe concurrent agent execution.
+//! Global resources are registered via
+//! [`Server::insert_global()`](crate::server::Server::insert_global) and shared
+//! across all execution contexts. Local resources are registered via
+//! [`Server::register_local()`](crate::server::Server::register_local) and
+//! isolated per-context, enabling safe concurrent agent execution.
 //!
 //! # Example
 //!
 //! ```
-//! use polaris_system::resource::{Resources, GlobalResource, LocalResource};
+//! use polaris_system::resource::{GlobalResource, LocalResource};
 //! use polaris_system::param::{Res, ResMut};
+//! use polaris_system::system;
 //!
 //! // Global resource - shared, read-only
 //! struct Config { name: String }
@@ -34,12 +38,14 @@
 //! struct Memory { messages: Vec<String> }
 //! impl LocalResource for Memory {}
 //!
-//! // In systems:
-//! fn my_system(
-//!     config: Res<Config>,      // OK - reads global
-//!     mut memory: ResMut<Memory>, // OK - mutates local
-//!     // mut cfg: ResMut<Config>, // Compile error! GlobalResource is read-only
-//! ) {}
+//! // Systems declare resources as parameters
+//! #[system]
+//! async fn my_system(
+//!     config: Res<Config>,        // reads global
+//!     mut memory: ResMut<Memory>, // mutates local
+//! ) {
+//!     memory.messages.push(config.name.clone());
+//! }
 //! ```
 
 mod output;
