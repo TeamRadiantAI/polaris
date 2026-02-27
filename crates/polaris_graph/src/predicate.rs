@@ -13,8 +13,9 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use polaris_graph::predicate::Predicate;
+//! ```
+//! use polaris_graph::predicate::{Predicate, ErasedPredicate};
+//! use polaris_system::param::SystemContext;
 //!
 //! struct ReasoningResult {
 //!     needs_tool: bool,
@@ -23,13 +24,12 @@
 //! // Create a typed predicate
 //! let predicate = Predicate::<ReasoningResult, _>::new(|result| result.needs_tool);
 //!
-//! // Use in graph builder
-//! graph.add_conditional_branch::<ReasoningResult, _, _, _>(
-//!     "check_tool",
-//!     |result| result.needs_tool,
-//!     |g| g.add_system(use_tool),
-//!     |g| g.add_system(respond),
-//! );
+//! // Evaluate against a context
+//! let mut ctx = SystemContext::new();
+//! ctx.insert_output(ReasoningResult { needs_tool: true });
+//!
+//! let result = predicate.evaluate(&ctx).unwrap();
+//! assert!(result);
 //! ```
 
 use core::any::TypeId;
@@ -141,7 +141,7 @@ pub type BoxedDiscriminator = Box<dyn ErasedDiscriminator>;
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_graph::predicate::Predicate;
 ///
 /// struct Counter { value: i32 }
@@ -214,7 +214,7 @@ impl<T, F> fmt::Debug for Predicate<T, F> {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_graph::predicate::Discriminator;
 ///
 /// struct RouterOutput { action: &'static str }

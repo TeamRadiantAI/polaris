@@ -1,47 +1,50 @@
 //! Server runtime for plugin orchestration.
 //!
 //! The [`Server`] is the central runtime that manages plugins and resources.
-//! It is intentionally minimal — just a plugin orchestrator.
+//! It is purely a plugin orchestrator, all functionality is provided by plugins.
 //!
-//! # Philosophy
+//! ```
+//! # use polaris_system::server::Server;
+//! # use polaris_system::plugin::{Plugin, Version};
+//! # struct DefaultPlugins;
+//! # impl Plugin for DefaultPlugins { const ID: &'static str = "default"; const VERSION: Version = Version::new(0,0,1); fn build(&self, _: &mut Server) {} }
 //!
-//! **Everything is a plugin.** A bare server does nothing useful. All
-//! functionality comes from plugins.
-//!
-//! ```ignore
-//! // A minimal server has nothing
-//! Server::new().run(); // Does nothing useful
-//!
-//! // Functionality comes from plugins
 //! Server::new()
 //!     .add_plugins(DefaultPlugins)
-//!     .add_plugins(ToolsPlugin)
-//!     .add_plugins(MyAgentPlugin)
 //!     .run();
 //! ```
 //!
 //! # Resource Scoping
 //!
-//! The server distinguishes between two types of resources:
+//! The server distinguishes between two resource scopes:
 //!
-//! - **Global resources** - Server-lifetime, read-only, shared across all contexts
-//! - **Local resources** - Per-context, mutable, created fresh for each execution
+//! - **Global resources** ([`GlobalResource`](crate::resource::GlobalResource)) —
+//!   server-lifetime, read-only via [`Res<T>`](crate::param::Res)
+//! - **Local resources** ([`LocalResource`](crate::resource::LocalResource)) —
+//!   per-context, mutable via [`ResMut<T>`](crate::param::ResMut)
 //!
-//! ```ignore
-//! // In a plugin:
-//! fn build(&self, server: &mut Server) {
-//!     // Global: shared across all contexts, read-only
-//!     server.insert_global(Config::default());
-//!
-//!     // Local: fresh instance per context, mutable
-//!     server.register_local(Memory::new);
-//! }
-//!
-//! // Creating an execution context:
-//! let ctx = server.create_context();
-//! // ctx has access to global resources (read-only via Res<T>)
-//! // ctx has fresh local resources (mutable via ResMut<T>)
 //! ```
+//! # use polaris_system::server::Server;
+//! # use polaris_system::resource::{GlobalResource, LocalResource};
+//! # #[derive(Default)] struct Config;
+//! # impl GlobalResource for Config {}
+//! # struct Memory;
+//! # impl LocalResource for Memory {}
+//! # impl Memory { fn new() -> Self { Self } }
+//! # let mut server = Server::new();
+//! // Global: shared across all contexts, read-only via Res<T>
+//! server.insert_global(Config::default());
+//!
+//! // Local: fresh instance per context, mutable via ResMut<T>
+//! server.register_local(Memory::new);
+//!
+//! // Each call to create_context() produces a SystemContext
+//! // with its own local resources and access to globals
+//! let ctx = server.create_context();
+//! ```
+//!
+//! See [`SystemContext`](crate::param::SystemContext) for how systems resolve
+//! parameters from contexts.
 //!
 //! # Lifecycle
 //!
@@ -92,16 +95,8 @@ enum BuildState {
 
 /// The runtime that orchestrates plugins and manages resources.
 ///
-/// # Example
-///
-/// ```ignore
-/// use polaris_system::server::Server;
-///
-/// Server::new()
-///     .add_plugins(TracingPlugin::default())
-///     .add_plugins(MyPlugin)
-///     .run();
-/// ```
+/// See the [module-level documentation](crate::server) for resource scoping
+/// and lifecycle details.
 pub struct Server {
     /// Global resources (server-lifetime, read-only, shared across all contexts).
     ///
@@ -113,7 +108,7 @@ pub struct Server {
     ///
     /// Resources inserted via [`insert_resource()`](Self::insert_resource) go here.
     /// We keep this separate from `global` for mutable access to resources not
-    /// accessibble to systems via `Res<T>` and `ResMut<T>`. This is useful
+    /// accessible to systems via `Res<T>` and `ResMut<T>`. This is useful
     /// for plugins that need mutable server-wide state.
     /// Note: This is safe because Plugins' `update()` calls are not run concurrently.
     resources: Resources,
@@ -205,7 +200,17 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::plugin::{Plugin, Version};
+    /// # struct TracingPlugin;
+    /// # impl TracingPlugin { fn default() -> Self { Self } }
+    /// # impl Plugin for TracingPlugin { const ID: &'static str = "tracing"; const VERSION: Version = Version::new(0,0,1); fn build(&self, _: &mut Server) {} }
+    /// # struct DefaultPlugins;
+    /// # impl Plugin for DefaultPlugins { const ID: &'static str = "default"; const VERSION: Version = Version::new(0,0,1); fn build(&self, _: &mut Server) {} }
+    /// # struct MyPlugin;
+    /// # impl Plugin for MyPlugin { const ID: &'static str = "my"; const VERSION: Version = Version::new(0,0,1); fn build(&self, _: &mut Server) {} }
+    /// # let mut server = Server::new();
     /// server
     ///     .add_plugins(TracingPlugin::default())
     ///     .add_plugins(DefaultPlugins)
@@ -264,7 +269,11 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::resource::Resource;
+    /// # struct MyConfig { value: i32 }
+    /// # let mut server = Server::new();
     /// server.insert_resource(MyConfig { value: 42 });
     /// ```
     pub fn insert_resource<R: Resource>(&mut self, resource: R) -> Option<R> {
@@ -316,28 +325,27 @@ impl Server {
     // Scoped Resources (Global / Local)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /// Inserts a global resource into the server.
+    /// Inserts a [`GlobalResource`] into the server.
     ///
-    /// Global resources are:
-    /// - Server-lifetime (live as long as the server)
-    /// - Read-only (accessible via `Res<T>`, not `ResMut<T>`)
-    /// - Shared across all execution contexts
-    ///
-    /// Use this for configuration, tool registries, and other shared state
-    /// that should not be modified during execution.
+    /// If a resource of this type already exists, it is replaced and the
+    /// old value is returned.
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// #[derive(Resource)]
-    /// #[global]
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::resource::GlobalResource;
+    /// # use polaris_system::param::Res;
+    /// # use polaris_system::system;
     /// struct Config { name: String }
+    /// impl GlobalResource for Config {}
     ///
+    /// # let mut server = Server::new();
     /// server.insert_global(Config { name: "my-agent".into() });
     ///
-    /// // Later, in a system:
-    /// fn my_system(config: Res<Config>) {
-    ///     // Read-only access to shared config
+    /// // The global resource can later be used in a system.
+    /// #[system]
+    /// async fn my_system(config: Res<Config>) {
     /// }
     /// ```
     pub fn insert_global<R: GlobalResource>(&mut self, resource: R) -> Option<R> {
@@ -358,21 +366,20 @@ impl Server {
         self.global.get::<R>().ok()
     }
 
-    /// Registers a factory for creating per-context local resources.
+    /// Registers a factory for creating per-context [`LocalResource`] instances.
     ///
-    /// Local resources are:
-    /// - Per-context (fresh instance for each [`create_context()`](Self::create_context) call)
-    /// - Mutable (accessible via `ResMut<T>`)
-    /// - Isolated between contexts (Agent A's state ≠ Agent B's state)
-    ///
-    /// Use this for agent state, memory, scratchpads, and other state
-    /// that should be isolated per agent execution.
+    /// Each call to [`create_context()`](Self::create_context) invokes the
+    /// factory to produce a fresh instance.
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// #[derive(Resource)]
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::resource::LocalResource;
+    /// # use polaris_system::param::ResMut;
+    /// # use polaris_system::system;
     /// struct Memory { messages: Vec<String> }
+    /// impl LocalResource for Memory {}
     ///
     /// impl Memory {
     ///     fn new() -> Self {
@@ -380,10 +387,12 @@ impl Server {
     ///     }
     /// }
     ///
+    /// # let mut server = Server::new();
     /// server.register_local(Memory::new);
     ///
-    /// // Later, in a system:
-    /// fn my_system(mut memory: ResMut<Memory>) {
+    /// // The local resource can later be used in a system.
+    /// #[system]
+    /// async fn my_system(mut memory: ResMut<Memory>) {
     ///     memory.messages.push("Hello".into());
     /// }
     /// ```
@@ -410,7 +419,15 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::resource::{GlobalResource, LocalResource};
+    /// # #[derive(Default)] struct Config;
+    /// # impl GlobalResource for Config {}
+    /// # struct Memory;
+    /// # impl LocalResource for Memory {}
+    /// # impl Memory { fn new() -> Self { Self } }
+    /// # let mut server = Server::new();
     /// // Register resources
     /// server.insert_global(Config::default());
     /// server.register_local(Memory::new);
@@ -418,9 +435,9 @@ impl Server {
     /// // Create execution context
     /// let ctx = server.create_context();
     ///
-    /// // Access resources
+    /// // Resources can be accessed from the context
     /// let config = ctx.get_resource::<Config>().unwrap();  // From global
-    /// let mut memory = ctx.get_resource_mut::<Memory>().unwrap();  // Fresh instance
+    /// let mut memory = ctx.get_resource_mut::<Memory>().unwrap();  // Fresh local instance
     /// ```
     #[must_use]
     pub fn create_context(&self) -> SystemContext<'_> {
@@ -463,16 +480,17 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use polaris_system::api::API;
-    ///
-    /// pub struct AgentAPI { /* ... */ }
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::api::API;
+    /// pub struct AgentAPI;
     /// impl API for AgentAPI {}
+    /// # impl AgentAPI { fn new() -> Self { AgentAPI } }
     ///
     /// // In a plugin's build():
-    /// fn build(&self, server: &mut Server) {
-    ///     server.insert_api(AgentAPI::new());
-    /// }
+    /// # fn build_example(server: &mut Server) {
+    /// server.insert_api(AgentAPI::new());
+    /// # }
     /// ```
     pub fn insert_api<A: API>(&mut self, api: A) -> Option<A> {
         let type_id = TypeId::of::<A>();
@@ -489,13 +507,20 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::api::API;
+    /// # struct AgentAPI;
+    /// # impl API for AgentAPI {}
+    /// # impl AgentAPI { fn register(&self, _: &str, _: MyAgent) {} }
+    /// # struct MyAgent;
+    /// # impl MyAgent { fn new() -> Self { Self } }
     /// // In a plugin's ready():
-    /// fn ready(&self, server: &mut Server) {
-    ///     let api = server.api::<AgentAPI>()
-    ///         .expect("AgentAPI required");
-    ///     api.register("my-agent", MyAgent::new());
-    /// }
+    /// # fn ready_example(server: &mut Server) {
+    /// let api = server.api::<AgentAPI>()
+    ///     .expect("AgentAPI required");
+    /// api.register("my-agent", MyAgent::new());
+    /// # }
     /// ```
     #[must_use]
     pub fn api<A: API>(&self) -> Option<&A> {
@@ -505,14 +530,6 @@ impl Server {
     }
 
     /// Returns true if an API of type `A` exists.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// if server.contains_api::<AgentAPI>() {
-    ///     // AgentAPI is available
-    /// }
-    /// ```
     #[must_use]
     pub fn contains_api<A: API>(&self) -> bool {
         self.apis.contains_key(&TypeId::of::<A>())
@@ -528,27 +545,18 @@ impl Server {
     /// [`Plugin::tick_schedules()`] will have their [`Plugin::update()`] called.
     /// Plugins are ticked in dependency order (same as build/ready).
     ///
-    /// # Safety Guarantees
-    ///
-    /// The `built_plugins` array cannot be modified during tick:
-    /// - `built_plugins` is a private field, inaccessible to plugins
-    /// - Calling `add_plugins()` during update queues to `pending_plugins`, not `built_plugins`
-    /// - Calling `finish()` during update panics (already built)
-    ///
-    /// # When to Call
-    ///
-    /// Layer 2 (`polaris_agent`) decides when to call this method based on
-    /// agent execution events. Common schedules might include:
-    /// - `PostAgentRun` - After an agent completes execution
-    /// - `PreTurn` / `PostTurn` - Before/after each turn in a conversation
+    /// Typically called by Layer 2 (`polaris_agent`) in response to agent
+    /// execution events (e.g. after an agent run or between conversation turns).
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::server::Server;
     /// // Layer 2 defines schedule marker types:
     /// pub struct PostAgentRun;
     ///
     /// // Layer 2 executor triggers the tick:
+    /// # let mut server = Server::new();
     /// server.tick::<PostAgentRun>();
     /// ```
     pub fn tick<S: 'static>(&mut self) {
@@ -597,14 +605,6 @@ impl Server {
     /// - If a plugin's dependency is not satisfied
     /// - If there is a circular dependency between plugins
     /// - If called more than once
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut server = Server::new();
-    /// server.add_plugins(MyPlugin);
-    /// server.finish(); // Build and ready all plugins
-    /// ```
     pub fn finish(&mut self) {
         if self.build_state != BuildState::NotStarted {
             panic!("Server::finish() was already called. Cannot build twice.");
@@ -677,8 +677,19 @@ impl Server {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// #[test]
+    /// ```
+    /// # use polaris_system::server::Server;
+    /// # use polaris_system::plugin::{Plugin, Version};
+    /// # use polaris_system::resource::Resource;
+    /// # struct MyResource;
+    /// # struct MyPlugin;
+    /// # impl Plugin for MyPlugin {
+    /// #     const ID: &'static str = "my";
+    /// #     const VERSION: Version = Version::new(0,0,1);
+    /// #     fn build(&self, server: &mut Server) {
+    /// #         server.insert_resource(MyResource);
+    /// #     }
+    /// # }
     /// fn test_plugin() {
     ///     let mut server = Server::new();
     ///     server.add_plugins(MyPlugin);
@@ -695,14 +706,6 @@ impl Server {
     ///
     /// Call this when shutting down the server to allow plugins to
     /// gracefully release resources.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// server.run();
-    /// // ... server is running ...
-    /// server.cleanup(); // Graceful shutdown
-    /// ```
     pub fn cleanup(&mut self) {
         // Cleanup in reverse order (dependents before dependencies)
         for i in (0..self.built_plugins.len()).rev() {

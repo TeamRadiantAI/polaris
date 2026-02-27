@@ -27,18 +27,18 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use polaris_graph::hooks::events::GraphEvent;
-//!
-//! // Observer: just logs events
-//! hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
+//! ```
+//! # use polaris_graph::hooks::{HooksAPI, events::GraphEvent, schedule::{OnSystemStart, OnSystemComplete, OnSystemError}};
+//! # fn example(hooks: &mut HooksAPI) -> Result<(), Box<dyn std::error::Error>> {
+//! // Observer to log events
+//! hooks.register_observer::<OnSystemStart, _>("logger", |event: &GraphEvent| {
 //!     if let GraphEvent::SystemStart { system_name, .. } = event {
-//!         tracing::info!("System {} starting", system_name);
+//!         println!("System {} starting", system_name);
 //!     }
 //! })?;
 //!
 //! // Multi-schedule observer
-//! hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError)>(
+//! hooks.register_observer::<(OnSystemStart, OnSystemComplete, OnSystemError), _>(
 //!     "tracker",
 //!     |event: &GraphEvent| match event {
 //!         GraphEvent::SystemStart { system_name, .. } => println!("Start: {}", system_name),
@@ -48,23 +48,33 @@
 //!     },
 //! )?;
 //!
-//! // Provider: injects SystemInfo resource via return value
-//! hooks.register_provider::<OnSystemStart, SystemInfo>("devtools", |event: &GraphEvent| {
+//! // Provider that injects SystemInfo resource via return value
+//! # use polaris_system::resource::LocalResource;
+//! # struct SystemInfo { node_id: polaris_graph::node::NodeId, name: &'static str }
+//! # impl SystemInfo { fn new(n: polaris_graph::node::NodeId, s: &'static str) -> Self { Self { node_id: n, name: s } } }
+//! # impl LocalResource for SystemInfo {}
+//! hooks.register_provider::<OnSystemStart, SystemInfo, _>("devtools", |event: &GraphEvent| {
 //!     if let GraphEvent::SystemStart { node_id, system_name } = event {
-//!         Some(SystemInfo::new(*node_id, system_name))
+//!         Some(SystemInfo::new(node_id.clone(), system_name))
 //!     } else {
 //!         None
 //!     }
 //! })?;
 //!
 //! // For direct access to the system context, register directly with register_boxed:
+//! # use core::any::TypeId;
+//! # use polaris_graph::hooks::api::BoxedHook;
+//! # use polaris_system::plugin::ScheduleId;
+//! # struct CustomResource;
 //! let schedule = ScheduleId::of::<OnSystemStart>();
-//! hooks.register_boxed(*schedule, "custom", BoxedHook::new(
-//!     move |ctx, event: &GraphEvent| {
+//! hooks.register_boxed(schedule, "custom", BoxedHook::new(
+//!     move |_ctx, _event: &GraphEvent| {
 //!         // custom logic here, with access to ctx for resource injection
 //!     },
 //!     vec![TypeId::of::<CustomResource>()], // declare provided resource type
 //! ))?;
+//! # Ok(())
+//! # }
 //! ```
 
 pub mod api;

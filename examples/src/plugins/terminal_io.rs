@@ -1,7 +1,7 @@
 //! Terminal I/O provider for CLI-based agent interaction.
 //!
 //! Provides [`TerminalIOProvider`] which implements [`IOProvider`] for stdin/stdout
-//! communication, and [`TerminalIOPlugin`] which registers it as the [`UserIO`] global.
+//! communication, and [`TerminalIOPlugin`] which registers it as the [`UserIO`] local resource.
 
 use polaris::plugins::{IOContent, IOError, IOMessage, IOPlugin, IOProvider, IOSource, UserIO};
 use polaris::system::plugin::{Plugin, PluginId, Version};

@@ -57,7 +57,7 @@ impl<T: Send + Sync + 'static> Resource for T {}
 /// Global resources are:
 /// - Stored at the server level (server lifetime)
 /// - Shared across all execution contexts (agents, sessions, turns)
-/// - Read-only (cannot be used with `ResMut<T>`)
+/// - Read-only (accessible via `Res<T>`, not `ResMut<T>`)
 ///
 /// Use this for configuration, tool registries, and other shared state
 /// that should not be modified during agent execution.
@@ -66,8 +66,9 @@ impl<T: Send + Sync + 'static> Resource for T {}
 ///
 /// ```
 /// use polaris_system::resource::GlobalResource;
-/// use polaris_system::prelude::{Res, ResMut};
+/// use polaris_system::param::Res;
 /// use polaris_system::server::Server;
+/// use polaris_system::system;
 ///
 /// struct Config {
 ///     system_prompt: String,
@@ -76,12 +77,17 @@ impl<T: Send + Sync + 'static> Resource for T {}
 ///
 /// impl GlobalResource for Config {}
 ///
-/// let mut server = Server::new()
-///     .insert_global(Config { system_prompt: "You are an AI.".into(), max_tokens: 2048 });
+/// // Register via Server::insert_global()
+/// let mut server = Server::new();
+/// server.insert_global(Config {
+///     system_prompt: "You are an AI.".into(),
+///     max_tokens: 2048,
+/// });
 ///
-/// // Reading a GlobalResource works fine:
-/// fn my_system(config: Res<Config>) {
-///     // config is read-only
+/// // Access as read-only in systems via Res<T>
+/// #[system]
+/// async fn my_system(config: Res<Config>) {
+///     // config.system_prompt, config.max_tokens available
 /// }
 /// ```
 ///
@@ -89,19 +95,9 @@ impl<T: Send + Sync + 'static> Resource for T {}
 ///
 /// ```compile_fail
 /// # use polaris_system::resource::GlobalResource;
-/// # use polaris_system::prelude::{Res, ResMut};
-/// # use polaris_system::server::Server;
-/// #
-/// # struct Config {
-/// #     system_prompt: String,
-/// #     max_tokens: usize,
-/// # }
-/// #
+/// # use polaris_system::param::ResMut;
+/// # struct Config { system_prompt: String, max_tokens: usize }
 /// # impl GlobalResource for Config {}
-/// #
-/// let mut server = Server::new()
-///     .insert_global(Config { system_prompt: "You are an AI.".into(), max_tokens: 2048 });
-///
 /// fn bad_system(mut config: ResMut<Config>) {  // Compile error!
 ///     // GlobalResource cannot be mutated
 /// }
@@ -122,28 +118,25 @@ pub trait GlobalResource: Resource {}
 ///
 /// ```
 /// use polaris_system::resource::LocalResource;
-/// use polaris_system::prelude::ResMut;
+/// use polaris_system::param::ResMut;
 /// use polaris_system::server::Server;
+/// use polaris_system::system;
 ///
-/// struct Message {
-///     content: String,
-/// }
+/// struct Message { content: String }
 ///
 /// #[derive(Default)]
-/// struct Memory {
-///     messages: Vec<Message>,
-/// }
+/// struct Memory { messages: Vec<Message> }
 ///
 /// impl LocalResource for Memory {}
 ///
-/// // In a plugin:
-/// let mut server = Server::new()
-///     .register_local(Memory::default);  // Factory, creates per-context
+/// // Register a factory via Server::register_local()
+/// let mut server = Server::new();
+/// server.register_local(Memory::default);
 ///
-/// // In a system:
-/// fn my_system(mut memory: ResMut<Memory>) {  // OK
-///     let new_message = Message { content: "Hello, world!".into() };
-///     memory.messages.push(new_message);
+/// // Access as mutable in systems via ResMut<T>
+/// #[system]
+/// async fn my_system(mut memory: ResMut<Memory>) {
+///     memory.messages.push(Message { content: "Hello".into() });
 /// }
 /// ```
 pub trait LocalResource: Resource {}

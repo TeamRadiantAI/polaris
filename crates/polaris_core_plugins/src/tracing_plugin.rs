@@ -14,7 +14,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_system::server::Server;
 //! use polaris_system::param::Res;
 //! use polaris_system::system;
@@ -84,7 +84,7 @@ pub enum TracingFormat {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_system::param::Res;
 /// use polaris_system::system;
 /// use polaris_core_plugins::TracingConfig;
@@ -136,7 +136,7 @@ impl GlobalResource for TracingConfig {}
 ///
 /// # Example
 ///
-/// ```no_run
+/// ```
 /// use polaris_system::server::Server;
 /// use polaris_core_plugins::{ServerInfoPlugin, TracingPlugin, TracingFormat};
 /// use tracing::Level;
@@ -153,7 +153,7 @@ impl GlobalResource for TracingConfig {}
 ///
 /// # Configuration Options
 ///
-/// ```no_run
+/// ```
 /// use polaris_core_plugins::{TracingPlugin, TracingFormat};
 /// use tracing::Level;
 ///
@@ -174,7 +174,7 @@ impl GlobalResource for TracingConfig {}
 ///
 /// Use `with_env_filter` to set target-specific log levels:
 ///
-/// ```no_run
+/// ```
 /// use polaris_core_plugins::TracingPlugin;
 ///
 /// TracingPlugin::default()
@@ -231,9 +231,11 @@ impl TracingPlugin {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// use polaris_core_plugins::TracingPlugin;
+    ///
     /// TracingPlugin::new()
-    ///     .with_env_filter("polaris=debug,hyper=warn,tower=info")
+    ///     .with_env_filter("polaris=debug,hyper=warn,tower=info");
     /// ```
     #[must_use]
     pub fn with_env_filter(mut self, filter: impl Into<String>) -> Self {

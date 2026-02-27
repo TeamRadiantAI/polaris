@@ -14,19 +14,26 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_models::{ModelRegistry, ModelsPlugin};
-//! use polaris_models::llm::{GenerationRequest, Message};
+//! use polaris_models::llm::GenerationRequest;
 //! use polaris_system::param::Res;
+//! use polaris_system::system::SystemError;
+//! use polaris_system::system;
 //!
 //! #[system]
-//! async fn my_agent(registry: Res<ModelRegistry>) -> Response {
-//!     let llm = registry.llm("openai/gpt-4o")?;
+//! async fn my_agent(registry: Res<ModelRegistry>) -> Result<String, SystemError> {
+//!     let llm = registry
+//!         .llm("openai/gpt-4o")
+//!         .map_err(|e| SystemError::ExecutionError(e.to_string()))?;
 //!
 //!     let request = GenerationRequest::with_system("You are helpful", "Hello!");
-//!     let response = llm.generate(request).await?;
+//!     let response = llm
+//!         .generate(request)
+//!         .await
+//!         .map_err(|e| SystemError::ExecutionError(e.to_string()))?;
 //!
-//!     // ...
+//!     Ok(response.text())
 //! }
 //! ```
 

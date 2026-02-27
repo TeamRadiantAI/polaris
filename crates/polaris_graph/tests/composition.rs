@@ -597,13 +597,7 @@ async fn test_arbitrary_composition() {
 ///
 /// This property test alone cannot catch bugs where both implementations have
 /// the same error. Ground truth comes from the hand-written unit tests above
-/// (`test_loop`, `test_decision`, etc.) which assert hard-coded expected values:
-///
-/// ```ignore
-/// // Unit test verifies absolute behavior
-/// let (log, nodes) = run_fragment(loop_body_n(5)).await.unwrap();
-/// assert_eq!(log.count(&nodes[0]), 5);  // Hard-coded: loop runs exactly 5 times
-/// ```
+/// (`test_loop`, `test_decision`, etc.) which assert hard-coded expected values.
 ///
 /// Given that basic behaviors are verified by unit tests, this property test
 /// verifies that **nested compositions** of those behaviors produce consistent

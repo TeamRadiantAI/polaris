@@ -6,8 +6,14 @@
 //!
 //! # Quick Start
 //!
-//! ```ignore
-//! use polaris_tools::{tool, ToolsPlugin, ToolRegistry};
+//! ```
+//! use polaris_tools::{tool, ToolsPlugin, ToolRegistry, ToolError};
+//! use polaris_system::plugin::{Plugin, PluginId, Version};
+//! use polaris_system::server::Server;
+//!
+//! let mut server = Server::new();
+//! server.add_plugins(ToolsPlugin);
+//! server.add_plugins(SearchPlugin);
 //!
 //! // Define a tool with the #[tool] macro
 //! #[tool]
@@ -23,9 +29,20 @@
 //! }
 //!
 //! // Register in a plugin
+//! struct SearchPlugin;
+//!
 //! impl Plugin for SearchPlugin {
+//!     const ID: &'static str = "search";
+//!     const VERSION: Version = Version::new(0, 0, 1);
+//!
+//!     fn dependencies(&self) -> Vec<PluginId> {
+//!         vec![PluginId::of::<ToolsPlugin>()]
+//!     }
+//!
 //!     fn build(&self, server: &mut Server) {
-//!         let mut registry = server.get_resource_mut::<ToolRegistry>().unwrap();
+//!         let mut registry = server
+//!             .get_resource_mut::<ToolRegistry>()
+//!             .expect("ToolsPlugin must be added before SearchPlugin");
 //!         registry.register(search());
 //!     }
 //! }

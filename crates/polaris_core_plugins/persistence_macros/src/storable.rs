@@ -30,15 +30,10 @@ fn default_version() -> String {
 /// Generates an implementation of `polaris_core_plugins::persistence::Storable` for the
 /// annotated struct.
 ///
-/// # Example
+/// # Attributes
 ///
-/// ```ignore
-/// #[derive(Serialize, Deserialize, Storable)]
-/// #[storable(key = "ConversationMemory", version = "2.0.0")]
-/// struct ConversationMemory {
-///     messages: Vec<String>,
-/// }
-/// ```
+/// - `key` (required): The stable storage key.
+/// - `version` (optional): The schema version. Defaults to `"1.0.0"`.
 pub(crate) fn derive_storable(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 

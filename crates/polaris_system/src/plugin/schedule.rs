@@ -1,74 +1,51 @@
 //! Schedule identifiers for tick-based plugin updates.
 //!
-//! This module provides [`ScheduleId`], which identifies tick schedules that
-//! plugins can register for. Layer 2 defines schedule marker types, and
-//! Layer 3 plugins declare interest in them.
-//!
-//! # Schedule Trait
-//!
-//! The [`Schedule`] trait marks types as schedule identifiers. Layer 2 defines
-//! schedule markers and associates them with events at the Layer 2 level.
-//!
-//! ```ignore
-//! // Layer 2 defines:
-//! pub struct OnSystemStart;
-//! impl Schedule for OnSystemStart {}
-//!
-//! // Layer 3 can then:
-//! hooks.register_observer::<OnSystemStart>("logger", |event| { ... })?;
-//! ```
-//!
-//! # Multi-Schedule Registration
-//!
-//! [`IntoScheduleIds`] enables registering hooks for multiple schedules at once:
-//!
-//! ```ignore
-//! hooks.register_observer::<(OnSystemStart, OnSystemComplete)>(
-//!     "lifecycle_logger",
-//!     |event: &GraphEvent| { ... },
-//! )?;
-//! ```
+//! Schedules are the mechanism by which the executor notifies plugins of
+//! lifecycle events. A schedule is identified by a marker type (any `'static`
+//! type) wrapped in a [`ScheduleId`]. See [`ScheduleId`] for the layered
+//! architecture and a full example.
 
 use core::any::TypeId;
 use variadics_please::all_tuples;
 
-/// Identifier for a tick schedule, based on a marker type.
+/// Identifier for a tick schedule, derived from a marker type.
 ///
-/// Layer 2 defines schedule marker types (e.g., `PostAgentRun`, `PreTurn`),
-/// and Layer 3 plugins reference them via `ScheduleId` to declare which
-/// schedules they want to receive updates on.
+/// A `ScheduleId` wraps a `TypeId` so that any `'static` type can serve as a
+/// schedule marker. The tick system is split across layers:
 ///
-/// # Architecture
-///
-/// The tick system follows a layered responsibility model:
-///
-/// - **Layer 1 (`polaris_system`)**: Provides the tick mechanism via [`ScheduleId`]
-///   and [`Server::tick()`](crate::server::Server::tick)
-/// - **Layer 2 (`polaris_agent`)**: Defines schedule marker types and triggers ticks
-///   at appropriate times during agent execution
-/// - **Layer 3 (plugins)**: Declare which schedules they want via
-///   [`Plugin::tick_schedules()`](super::Plugin::tick_schedules)
+/// - **Layer 1** (`polaris_system`) — provides the tick mechanism via
+///   `ScheduleId` and [`Server::tick()`](crate::server::Server::tick).
+/// - **Layer 2** (`polaris_graph`) — defines schedule marker types (e.g.
+///   `OnGraphStart`, `OnSystemComplete`) and triggers ticks at the
+///   appropriate points during execution.
+/// - **Layer 3** (plugins) — declares interest in schedules via
+///   [`Plugin::tick_schedules()`](super::Plugin::tick_schedules) and
+///   responds in [`Plugin::update()`](super::Plugin::update).
 ///
 /// # Example
 ///
-/// ```ignore
-/// // Layer 2 defines schedule marker types:
+/// ```
+/// # use polaris_system::plugin::{Plugin, PluginId, Version, ScheduleId};
+/// # use polaris_system::server::Server;
+/// // Layer 2 defines a schedule marker type
 /// pub struct PostAgentRun;
-/// pub struct PreTurn;
 ///
-/// // Layer 3 plugin declares interest:
-/// impl Plugin for TracingPlugin {
+/// // Layer 3 plugin subscribes to it
+/// # struct MetricsPlugin;
+/// impl Plugin for MetricsPlugin {
+///     const ID: &'static str = "metrics";
+///     const VERSION: Version = Version::new(0, 1, 0);
+///
+///     fn build(&self, _server: &mut Server) {}
+///
 ///     fn tick_schedules(&self) -> Vec<ScheduleId> {
 ///         vec![ScheduleId::of::<PostAgentRun>()]
 ///     }
 ///
-///     fn update(&self, server: &mut Server, schedule: ScheduleId) {
-///         // Flush traces after each agent run
+///     fn update(&self, _server: &mut Server, _schedule: ScheduleId) {
+///         // called when the executor runs server.tick::<PostAgentRun>()
 ///     }
 /// }
-///
-/// // Layer 2 executor triggers the tick:
-/// server.tick::<PostAgentRun>();
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScheduleId {
@@ -81,7 +58,8 @@ impl ScheduleId {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::plugin::ScheduleId;
     /// // Define a schedule marker type
     /// pub struct PostAgentRun;
     ///
@@ -115,24 +93,12 @@ impl ScheduleId {
 
 /// Marker trait for schedule types.
 ///
-/// Layer 2 implements this trait for schedule markers. The trait is intentionally
-/// minimal (a pure marker) to keep Layer 1 generic. Event types are defined and
-/// associated with schedules at Layer 2.
+/// Implemented by Layer 2 for lifecycle markers (e.g. `OnGraphStart`,
+/// `OnSystemComplete`). The trait carries no methods; it exists so that
+/// [`IntoScheduleIds`] can accept schedule types by trait bound.
 ///
-/// # Example
-///
-/// ```ignore
-/// // Layer 2 defines:
-/// pub struct OnSystemStart;
-/// impl Schedule for OnSystemStart {}
-///
-/// // Layer 3 can then use type-safe registration:
-/// hooks.register_observer::<OnSystemStart>("logger", |event: &GraphEvent| {
-///     if let GraphEvent::SystemStart { system_name, .. } = event {
-///         tracing::info!("System {} starting", system_name);
-///     }
-/// })?;
-/// ```
+/// Note that [`ScheduleId::of`] accepts any `'static` type and does not
+/// require this trait — `Schedule` is a convention, not a hard constraint.
 pub trait Schedule: 'static {}
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -141,15 +107,8 @@ pub trait Schedule: 'static {}
 
 /// Trait for types that can be converted into a list of schedule IDs.
 ///
-/// This enables registering hooks for multiple schedules at once using tuple syntax:
-///
-/// ```ignore
-/// // Single schedule
-/// hooks.register_observer::<OnSystemStart>("hook", |event| { ... })?;
-///
-/// // Multiple schedules
-/// hooks.register_observer::<(OnSystemStart, OnSystemComplete)>("hook", |event| { ... })?;
-/// ```
+/// Implemented for single schedules and tuples of schedules, enabling flexible
+/// registration patterns in Layer 2.
 pub trait IntoScheduleIds {
     /// Returns the schedule IDs for this type.
     fn schedule_ids() -> Vec<ScheduleId>;

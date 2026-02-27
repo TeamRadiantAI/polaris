@@ -19,9 +19,12 @@
 //!
 //! The derive macro `#[derive(Storable)]` may be used to directly implement the [`Storable`] trait:
 //!
-//! ```ignore
+//! ```
+//! # use serde::{Serialize, Deserialize};
+//! # use polaris_core_plugins::persistence::Storable;
+//!
 //! #[derive(Serialize, Deserialize, Storable)]
-//! #[storable(key = "ConversationMemory", version = "2.0.0")]
+//! #[storable(key = "ConversationMemory", schema_version = "2.0.0")]
 //! struct ConversationMemory {
 //!     messages: Vec<String>,
 //! }
@@ -46,7 +49,10 @@ pub use persistence_macros::Storable;
 ///
 /// Can be derived via `#[derive(Storable)]`:
 ///
-/// ```ignore
+/// ```
+/// # use serde::{Serialize, Deserialize};
+/// # use polaris_core_plugins::persistence::Storable;
+///
 /// #[derive(Serialize, Deserialize, Storable)]
 /// #[storable(key = "ConversationMemory", schema_version = "2.0.0")]
 /// struct ConversationMemory {
@@ -169,10 +175,12 @@ impl PersistenceAPI {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
     /// use polaris_system::resource::LocalResource;
+    /// use polaris_system::plugin::{Plugin, PluginId, Version};
+    /// use polaris_system::server::Server;
     /// use serde::{Serialize, Deserialize};
-    /// use persistence_macros::Storable;
+    /// use polaris_core_plugins::persistence::{Storable, PersistenceAPI, PersistencePlugin};
     ///
     /// #[derive(Serialize, Deserialize, Storable)]
     /// #[storable(key = "Memory", schema_version = "1.0.0")]
@@ -182,9 +190,27 @@ impl PersistenceAPI {
     ///
     /// impl LocalResource for Memory {}
     ///
-    /// // In the plugin's ready() hook:
-    /// let api = server.api::<PersistenceAPI>();
-    /// api.register::<Memory>(self.id());
+    /// struct MyPlugin;
+    ///
+    /// impl Plugin for MyPlugin {
+    ///     const ID: &'static str = "my_plugin";
+    ///     const VERSION: Version = Version::new(1, 0, 0);
+    ///
+    ///     fn dependencies(&self) -> Vec<PluginId> {
+    ///         vec![PluginId::of::<PersistencePlugin>()]
+    ///     }
+    ///
+    ///     fn build(&self, server: &mut Server) {
+    ///         server.insert_resource(Memory { messages: vec![] });
+    ///     }
+    ///
+    ///     fn ready(&self, server: &mut Server) {
+    ///         // Register the resource type for persistence
+    ///         let api = server.api::<PersistenceAPI>()
+    ///             .expect("PersistenceAPI should be available");
+    ///         api.register::<Memory>(Self::ID);
+    ///     }
+    /// }
     /// ```
     pub fn register<R>(&self, plugin_id: &'static str)
     where

@@ -5,14 +5,14 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_graph::dev::SystemInfo;
 //! use polaris_system::param::Res;
 //! use polaris_system::system;
 //!
 //! #[system]
 //! async fn my_system(info: Res<SystemInfo>) {
-//!     tracing::info!(
+//!     eprintln!(
 //!         "Executing system '{}' on node {:?}",
 //!         info.system_name(),
 //!         info.node_id()
@@ -24,7 +24,7 @@
 //!
 //! Add `DevToolsPlugin` to your server:
 //!
-//! ```ignore
+//! ```
 //! use polaris_graph::dev::DevToolsPlugin;
 //! use polaris_system::server::Server;
 //!
@@ -68,7 +68,7 @@ impl LocalResource for SystemInfo {}
 
 impl SystemInfo {
     /// Creates a new `SystemInfo` with the given execution context.
-    fn new(node_id: NodeId, system_name: &'static str) -> Self {
+    pub fn new(node_id: NodeId, system_name: &'static str) -> Self {
         Self {
             node_id,
             system_name,
@@ -96,7 +96,7 @@ impl SystemInfo {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use polaris_graph::dev::DevToolsPlugin;
 /// use polaris_system::server::Server;
 ///

@@ -20,13 +20,7 @@ use polaris_system::server::Server;
 ///
 /// # Usage
 ///
-/// Add `ModelsPlugin` first, then add provider plugins which will register themselves:
-///
-/// ```ignore
-/// server
-///     .add_plugins(ModelsPlugin)
-///     .add_plugins(AnthropicPlugin::from_env("ANTHROPIC_API_KEY"));
-/// ```
+/// Add `ModelsPlugin` first, then add provider plugins which will register themselves.
 ///
 /// Consumers can then obtain model handles via the registry using provider/model
 /// identifiers (e.g., `"anthropic/claude-sonnet-4-20250514"`). See [`ModelRegistry`] for details.

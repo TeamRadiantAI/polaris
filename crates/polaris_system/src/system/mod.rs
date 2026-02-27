@@ -1,44 +1,31 @@
 //! System execution primitives.
 //!
-//! This module provides the core abstractions for defining and executing systems.
-//! Systems are pure async functions that transform inputs into outputs.
+//! A [`System`] is an async function that receives dependencies via parameter
+//! injection from a [`SystemContext`](crate::param::SystemContext) and produces
+//! a typed output. All dependencies are declared as parameters, making data
+//! flow explicit and systems composable across different execution contexts
+//! (graph nodes, hooks, standalone invocations).
 //!
-//! # Philosophy Alignment
+//! See [`System`] for the full trait definition and examples.
 //!
-//! - **Pure functions**: Systems have no hidden state; all dependencies are explicit via parameters
-//! - **Async by default**: Systems are async to support LLM calls, tool invocations, I/O
-//! - **Type-safe**: Input/output types enforce valid data flow at compile time
-//! - **Composable**: Systems work across different agent patterns (ReAct, ReWOO, etc.)
-//!
-//! # Example
-//!
-//! Use the `#[system]` attribute macro to define systems with ergonomic async syntax:
+//! Use the [`#[system]`](crate::system) attribute macro to define systems from
+//! regular async functions:
 //!
 //! ```
 //! use polaris_system::param::Res;
+//! use polaris_system::resource::GlobalResource;
 //! use polaris_system::system;
-//! use polaris_system::prelude::SystemAccess;
 //!
-//! // Define resource types
-//! struct LLM;
-//! struct Memory {
-//!     context: String,
-//! }
+//! struct Memory { context: String }
+//! impl GlobalResource for Memory {}
 //!
-//! // Define output type
-//! struct ReasoningResult {
-//!     response: String,
-//! }
+//! struct ReasoningResult { response: String }
 //!
 //! #[system]
-//! async fn reason(llm: Res<LLM>, memory: Res<Memory>) -> ReasoningResult {
-//!     // Access memory context and produce a result
+//! async fn reason(memory: Res<Memory>) -> ReasoningResult {
 //!     ReasoningResult { response: memory.context.clone() }
 //! }
 //! ```
-//!
-//! The `#[system]` macro transforms async functions into the required `BoxFuture` signature
-//! to satisfy HRTB (Higher-Ranked Trait Bounds) for lifetime-parameterized parameters.
 
 use crate::param::{ParamError, SystemAccess, SystemContext};
 use crate::resource::Output;
@@ -62,25 +49,32 @@ pub enum SystemError {
 /// A boxed future that is Send.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// An executable unit of computation.
+/// An async unit of computation that receives dependencies via
+/// [`SystemParam`](crate::param::SystemParam) injection and produces a typed
+/// [`Output`](crate::resource::Output).
 ///
-/// Systems are the fundamental building blocks of agent behavior. Each system:
-/// - Takes parameters via dependency injection ([`SystemParam`])
-/// - Executes asynchronously
-/// - Returns an output that can be read by subsequent systems
+/// Most users define systems with the [`#[system]`](crate::system) macro
+/// rather than implementing this trait directly:
 ///
-/// # Implementing System
+/// ```
+/// use polaris_system::system::{IntoSystem, System};
+/// use polaris_system::param::Res;
+/// use polaris_system::resource::{GlobalResource, Output};
+/// use polaris_system::system;
 ///
-/// Most users won't implement `System` directly. Instead, use async functions
-/// with [`IntoSystem`]:
+/// struct Config;
+/// impl GlobalResource for Config {}
 ///
-/// ```ignore
+/// struct MyOutput;
+/// impl MyOutput { fn new(_: &Config) -> Self { Self } }
+///
+/// #[system]
 /// async fn my_system(config: Res<Config>) -> MyOutput {
 ///     MyOutput::new(&config)
 /// }
 ///
 /// // Automatically implements System via IntoSystem
-/// let system = my_system.into_system();
+/// let system = Box::new(my_system.into_system());
 /// ```
 pub trait System: Send + Sync + 'static {
     /// The output type produced by this system.
@@ -185,21 +179,9 @@ impl<S: System> ErasedSystem for S {
 
 /// Converts a type into a [`System`].
 ///
-/// This trait enables ergonomic system definition using regular async functions:
-///
-/// ```ignore
-/// async fn reason(llm: Res<LLM>) -> ReasoningResult {
-///     // ...
-/// }
-///
-/// // IntoSystem is implemented for async functions
-/// let system: impl System = reason.into_system();
-/// ```
-///
-/// # Marker Types
-///
-/// The `Marker` type parameter allows multiple implementations for the same
-/// function type (functions with different parameter counts).
+/// Implemented for async functions (via [`FunctionSystem`]) and for factory
+/// functions produced by the [`#[system]`](crate::system) macro (via
+/// [`SystemFnMarker`]). See [`System`] for a usage example.
 pub trait IntoSystem<Marker>: Sized {
     /// The resulting system type.
     type System: System;

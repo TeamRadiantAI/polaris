@@ -14,9 +14,13 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use polaris_graph::{Graph, GraphExecutor};
-//! use polaris_system::param::SystemContext;
+//! ```
+//! # use polaris_graph::{Graph, GraphExecutor};
+//! # use polaris_system::param::SystemContext;
+//! # async fn example_fn() -> Result<(), Box<dyn std::error::Error>> {
+//! # async fn reason() -> i32 { 1 }
+//! # async fn decide() -> i32 { 2 }
+//! # async fn respond() -> i32 { 3 }
 //!
 //! let mut graph = Graph::new();
 //! graph
@@ -24,9 +28,11 @@
 //!     .add_system(decide)
 //!     .add_system(respond);
 //!
-//! let ctx = SystemContext::new();
+//! let mut ctx = SystemContext::new();
 //! let executor = GraphExecutor::new();
-//! let result = executor.execute(&graph, &ctx, None).await?;
+//! let result = executor.execute(&graph, &mut ctx, None).await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Architecture

@@ -1,56 +1,56 @@
-//! System parameter injection.
+//! System parameter extraction and dependency injection.
 //!
-//! This module provides the dependency injection mechanism for systems.
-//! System functions declare parameters that implement [`SystemParam`],
-//! and these are automatically resolved from the [`SystemContext`] at runtime.
+//! Systems declare their dependencies as typed function parameters. The
+//! framework resolves each parameter from the [`SystemContext`] before the
+//! system executes, so systems remain plain `async fn`s with no manual
+//! resource lookup. Contexts are created by
+//! [`Server::create_context()`](crate::server::Server::create_context); see
+//! [`SystemContext`] for how they are structured and how resources are resolved.
 //!
-//! # Core Types
+//! # Parameter Types
 //!
-//! - [`Res<T>`] - Read-only access to a resource (walks hierarchy)
-//! - [`ResMut<T>`] - Mutable access to a local resource (current scope only)
-//! - [`Out<T>`] - Read previous system's output (ephemeral, per-execution)
+//! | Type | Access | Scope | Purpose |
+//! |------|--------|-------|---------|
+//! | [`Res<T>`] | Read-only | Walks context hierarchy | Read resources from any ancestor or global scope |
+//! | [`ResMut<T>`] | Read-write | Current scope only | Mutate resources owned by this context |
+//! | [`Out<T>`] | Read-only | Current context | Read the return value of a preceding system |
 //!
-//! # Hierarchical Resource Model
+//! # Conflict Detection
 //!
-//! The [`SystemContext`] supports hierarchical scoping through parent-child
-//! relationships. This enables multi-agent isolation:
+//! Each parameter declares an access pattern via [`SystemParam::access()`].
+//! The scheduler uses these declarations to detect borrow conflicts between
+//! systems *before* execution, following standard read-write lock semantics:
 //!
-//! - `Res<T>` walks up the parent chain to find resources (read-only)
-//! - `ResMut<T>` only accesses resources in the current scope (mutable)
-//!
-//! ```text
-//! Server (global resources: Config, ToolRegistry)
-//!    │
-//!    └── Agent Context (local: AgentMemory)
-//!           │
-//!           └── Session Context (local: ConversationHistory)
-//!                  │
-//!                  └── Turn Context (local: Scratchpad)
-//! ```
-//!
-//! # Access Descriptors
-//!
-//! Each parameter declares its access pattern via [`SystemParam::access()`].
-//! This enables conflict detection between systems at scheduling time:
-//!
-//! - Read + Read: OK (multiple readers)
-//! - Read + Write: CONFLICT
-//! - Write + Write: CONFLICT
+//! - **Read + Read** — compatible (multiple [`Res<T>`] allowed)
+//! - **Read + Write** — conflict ([`Res<T>`] and [`ResMut<T>`] to the same `T`)
+//! - **Write + Write** — conflict (two [`ResMut<T>`] to the same `T`)
 //!
 //! # Example
 //!
-//! ```ignore
-//! use polaris_system::param::{Res, ResMut, Out};
+//! A system that reads shared configuration, mutates local state, and
+//! consumes the output of a preceding system:
 //!
-//! // Res<Config> reads from global (via parent chain)
-//! // ResMut<Memory> writes to local scope only
-//! fn process(
-//!     config: Res<Config>,           // Global, read-only (via parent chain)
-//!     mut memory: ResMut<Memory>,    // Local, mutable (current scope)
-//!     previous: Out<PreviousResult>, // Previous system's output
-//! ) -> ProcessResult {
-//!     memory.record(&previous);
-//!     ProcessResult::new(&config, &previous)
+//! ```
+//! # use polaris_system::param::{Res, ResMut, Out};
+//! # use polaris_system::resource::{GlobalResource, LocalResource};
+//! # use polaris_system::system;
+//! # struct Config { verbose: bool }
+//! # impl GlobalResource for Config {}
+//! # struct Memory { messages: Vec<String> }
+//! # impl LocalResource for Memory {}
+//! # struct PreviousResult { summary: String }
+//! #[system]
+//! async fn process(
+//!     config: Res<Config>,
+//!     mut memory: ResMut<Memory>,
+//!     previous: Out<PreviousResult>,
+//! ) -> String {
+//!     memory.messages.push(previous.summary.clone());
+//!     if config.verbose {
+//!         format!("processed {} messages", memory.messages.len())
+//!     } else {
+//!         String::new()
+//!     }
 //! }
 //! ```
 
@@ -67,26 +67,12 @@ use crate::resource::{
 /// A parameter that can be injected into a system function.
 ///
 /// Types implementing this trait can appear as parameters in system functions.
-/// The framework automatically fetches them from the [`SystemContext`] before execution.
+/// The framework calls [`fetch`](Self::fetch) to resolve each parameter from the
+/// [`SystemContext`] before the system executes, and [`access`](Self::access) to
+/// declare the borrow pattern for conflict detection.
 ///
-/// # GAT Design
-///
-/// The `Item<'w>` GAT (Generic Associated Type) enables lifetime-parameterized
-/// params like `Res<T>` to work with `IntoSystem`. The GAT produces the
-/// correctly-lifetimed type when fetching from the context.
-///
-/// # Access Declaration
-///
-/// Each parameter declares its access pattern via [`access()`](Self::access),
-/// enabling conflict detection between systems at scheduling time.
-///
-/// # Built-in Implementations
-///
-/// - [`Res<T>`] - Immutable resource access (long-lived state)
-/// - [`ResMut<T>`] - Mutable resource access (long-lived state)
-/// - [`Out<T>`] - Previous system output (ephemeral)
-/// - `()` - Unit type (no parameter)
-/// - Tuples of `SystemParam` types
+/// See the [module documentation](self) for the built-in parameter types and
+/// conflict detection rules.
 pub trait SystemParam: Sized {
     /// The item type produced when fetching, parameterized by context lifetime.
     ///
@@ -128,20 +114,31 @@ pub enum ParamError {
     OutputNotFound(&'static str),
 }
 
-/// The execution context passed to systems during execution.
+/// The execution context for a single scope in the resource hierarchy.
 ///
-/// `SystemContext` provides hierarchical access to resources and outputs:
-/// - **Resources**: Owned by this scope, with read access to parent scopes
-/// - **Global Resources**: Read-only access to server-level shared state
-/// - **Outputs**: Owned, ephemeral system outputs for current execution
+/// Each `SystemContext` holds:
 ///
-/// # Hierarchical Scoping
+/// - **Resources** — long-lived state. Resources may be
+///   [`GlobalResource`](crate::resource::GlobalResource) (server-level,
+///   read-only) or [`LocalResource`](crate::resource::LocalResource)
+///   (per-context, mutable).
+/// - **Outputs** — ephemeral return values produced by preceding systems in
+///   the current execution, cleared between agent runs.
+/// - **Parent chain** — an optional reference to a parent context, forming a
+///   hierarchy that shares resources without sacrificing isolation.
 ///
-/// Contexts form a parent-child hierarchy for resource isolation, with global
-/// resources accessible from all contexts:
+/// Systems do not interact with `SystemContext` directly. The executor
+/// creates it, and the [`SystemParam`] implementations resolve each
+/// parameter from it automatically.
+///
+/// # Context Hierarchy
+///
+/// Contexts form a parent-child tree that isolates per-agent state while
+/// sharing server-level configuration. By design, a child may read its parent's
+/// resources but cannot mutate them:
 ///
 /// ```text
-/// Server (global resources: Config, ToolRegistry)
+/// Server (global: Config, ToolRegistry)
 ///    │
 ///    └── Agent Context (local: AgentMemory)
 ///           │
@@ -150,25 +147,29 @@ pub enum ParamError {
 ///                  └── Turn Context (local: Scratchpad)
 /// ```
 ///
-/// Resource lookup order for `Res<T>`:
-/// 1. Check local resources (current scope)
-/// 2. Walk up parent chain (shadowing: closest wins)
-/// 3. Check global resources (server-level)
+/// # Resource Lookup Order
 ///
-/// `ResMut<T>` only accesses resources in the current scope (mutable).
+/// When a system requests [`Res<T>`], the context searches:
 ///
-/// # Ownership Model
+/// 1. Local resources owned by this context
+/// 2. Parent contexts, walking up the chain (closest scope shadows)
+/// 3. Server-level global resources
+///
+/// [`ResMut<T>`] skips the hierarchy and only accesses resources in the
+/// current scope.
+///
+/// # Ownership
 ///
 /// ```text
 /// SystemContext<'parent>
-/// ├── parent: Option<&'parent SystemContext>  (read-only parent access)
-/// ├── globals: Option<&'parent Resources>     (server's global resources)
-/// ├── resources: Resources                     (owned, this scope's state)
-/// └── outputs: Outputs                         (owned, per-execution)
+/// ├── parent:    Option<&'parent SystemContext>   // read-only ancestor chain
+/// ├── globals:   Option<&'parent Resources>       // server-level globals
+/// ├── resources: Resources                        // owned local state
+/// └── outputs:   Outputs                          // owned ephemeral outputs
 /// ```
 ///
-/// The `globals` reference is inherited by child contexts, so all contexts
-/// in a hierarchy can access server-level resources.
+/// The `globals` reference is inherited by child contexts, so every context
+/// in a hierarchy can access server-level resources regardless of depth.
 pub struct SystemContext<'parent> {
     /// Parent context for hierarchical resource lookup.
     /// Read access walks up this chain; write access is current-scope only.
@@ -207,13 +208,6 @@ impl<'parent> SystemContext<'parent> {
     ///
     /// This is typically called by [`Server::create_context()`] to create
     /// execution contexts that can access server-level resources via `Res<T>`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let ctx = SystemContext::with_globals(server.global_resources());
-    /// // ctx can now access global resources via Res<T>
-    /// ```
     #[must_use]
     pub fn with_globals(globals: &'parent Resources) -> Self {
         Self {
@@ -230,7 +224,13 @@ impl<'parent> SystemContext<'parent> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```
+    /// # use polaris_system::param::SystemContext;
+    /// # use polaris_system::resource::LocalResource;
+    /// # #[derive(Clone)] struct Counter { value: i32 }
+    /// # impl LocalResource for Counter {}
+    /// # #[derive(Clone)] struct Config { name: String }
+    /// # impl LocalResource for Config {}
     /// let ctx = SystemContext::new()
     ///     .with(Counter { value: 0 })
     ///     .with(Config { name: "test".into() });
@@ -314,17 +314,13 @@ impl<'parent> SystemContext<'parent> {
         self.resources.contains::<R>()
     }
 
-    /// Gets an immutable reference to a resource, walking up the hierarchy.
-    ///
-    /// Lookup order:
-    /// 1. Check this context's local resources
-    /// 2. Walk up the parent chain (closest wins for shadowing)
-    /// 3. Check global resources (server-level)
+    /// Returns an immutable reference to a resource, searching the full
+    /// [hierarchy](Self#resource-lookup-order).
     ///
     /// # Errors
     ///
-    /// Returns an error if the resource doesn't exist in any scope
-    /// or is mutably borrowed.
+    /// Returns an error if the resource is not found in any scope or is
+    /// currently mutably borrowed.
     pub fn get_resource<R: Resource>(&self) -> Result<ResourceRef<R>, ParamError> {
         // Check local scope first
         match self.resources.get::<R>() {
@@ -358,15 +354,15 @@ impl<'parent> SystemContext<'parent> {
         Err(ParamError::ResourceNotFound(core::any::type_name::<R>()))
     }
 
-    /// Gets a mutable reference to a resource in the current scope only.
+    /// Returns a mutable reference to a resource in the current scope only.
     ///
-    /// Unlike `get_resource`, this does NOT walk up the parent chain.
-    /// Only resources in this context's local scope can be mutated.
+    /// Unlike [`get_resource`](Self::get_resource) this does not walk the parent chain. See
+    /// [Resource Lookup Order](Self#resource-lookup-order) for details.
     ///
     /// # Errors
     ///
-    /// Returns an error if the resource doesn't exist in this scope
-    /// or is already borrowed.
+    /// Returns an error if the resource is not found in this scope or is
+    /// already borrowed.
     pub fn get_resource_mut<R: Resource>(&self) -> Result<ResourceRefMut<R>, ParamError> {
         self.resources.get_mut::<R>().map_err(|err| match err {
             crate::resource::ResourceError::NotFound(name) => ParamError::ResourceNotFound(name),
@@ -503,16 +499,30 @@ impl<'parent> SystemContext<'parent> {
     }
 }
 
-/// Immutable access to a resource.
+/// Shared, read-only access to a resource.
 ///
-/// `Res<T>` provides read-only access to a resource stored in the [`SystemContext`].
-/// Multiple systems can hold `Res<T>` to the same resource simultaneously.
+/// `Res<T>` resolves `T` by walking the full
+/// [context hierarchy](SystemContext#resource-lookup-order), making it
+/// suitable to access both [`GlobalResource`](crate::resource::GlobalResource) and
+/// [`LocalResource`](crate::resource::LocalResource) types. Multiple systems
+/// may hold `Res<T>` to the same resource simultaneously.
+///
+/// Implements [`Deref<Target = T>`](core::ops::Deref).
 ///
 /// # Example
 ///
-/// ```ignore
-/// fn read_config(config: Res<Config>) {
-///     println!("Debug mode: {}", config.debug);
+/// ```
+/// # use polaris_system::param::Res;
+/// # use polaris_system::resource::GlobalResource;
+/// # use polaris_system::system;
+/// struct AppConfig {
+///     max_retries: usize,
+/// }
+/// impl GlobalResource for AppConfig {}
+///
+/// #[system]
+/// async fn check_config(config: Res<AppConfig>) -> String {
+///     format!("retries allowed: {}", config.max_retries)
 /// }
 /// ```
 pub struct Res<'w, T: Resource> {
@@ -542,36 +552,39 @@ impl<'a, T: Resource> SystemParam for Res<'a, T> {
     }
 }
 
-/// Mutable access to a resource.
+/// Mutable access to a local resource.
 ///
-/// `ResMut<T>` provides read-write access to a resource stored in the [`SystemContext`].
-/// Only one system can hold `ResMut<T>` to a resource at a time.
+/// `ResMut<T>` provides read-write access to a
+/// [`LocalResource`](crate::resource::LocalResource) in the current
+/// [`SystemContext`] scope. Unlike [`Res<T>`], it does not walk the context
+/// hierarchy — only resources owned by the current scope can be mutated.
 ///
-/// # `LocalResource` Requirement
+/// The `T: LocalResource` bound is enforced at compile time.
+/// [`GlobalResource`](crate::resource::GlobalResource) types cannot be used
+/// with `ResMut<T>`, which guarantees that server-level shared state remains
+/// read-only. See [`GlobalResource`](crate::resource::GlobalResource) for a
+/// `compile_fail` example demonstrating this invariant.
 ///
-/// `ResMut<T>` requires `T: LocalResource`. This enforces at compile time that
-/// only per-context resources can be mutated. Global resources (marked with
-/// `GlobalResource`) are read-only and can only be accessed via `Res<T>`.
+/// Borrows are tracked at runtime via an internal `RwLock`. If the resource
+/// is already borrowed (by [`Res<T>`] or another `ResMut<T>`), fetching
+/// returns [`ParamError::BorrowConflict`].
 ///
-/// ```ignore
-/// // This works - Memory is LocalResource
-/// fn update_memory(mut memory: ResMut<Memory>) {
-///     memory.messages.push(new_message);
-/// }
-///
-/// // This fails to compile - Config is GlobalResource
-/// fn bad_update(mut config: ResMut<Config>) {  // Error!
-///     config.name = "new".into();
-/// }
-/// ```
+/// Implements [`Deref<Target = T>`](core::ops::Deref) and
+/// [`DerefMut`](core::ops::DerefMut).
 ///
 /// # Example
 ///
-/// ```ignore
-/// struct Counter { value: i32 }
+/// ```
+/// # use polaris_system::param::ResMut;
+/// # use polaris_system::resource::LocalResource;
+/// # use polaris_system::system;
+/// struct Counter {
+///     value: i32,
+/// }
 /// impl LocalResource for Counter {}
 ///
-/// fn increment_counter(mut counter: ResMut<Counter>) {
+/// #[system]
+/// async fn increment_counter(mut counter: ResMut<Counter>) {
 ///     counter.value += 1;
 /// }
 /// ```
@@ -608,28 +621,37 @@ impl<'a, T: LocalResource> SystemParam for ResMut<'a, T> {
     }
 }
 
-/// Read-only access to a previous system's output.
+/// Read-only access to a preceding system's return value.
 ///
-/// `Out<T>` provides access to ephemeral data produced by a previous system
-/// in the current execution. Unlike [`Res<T>`] which accesses long-lived
-/// shared state, `Out<T>` reads from the outputs container which is cleared
-/// between agent runs.
+/// `Out<T>` reads ephemeral data from the current execution's output
+/// container. Outputs are produced when a system returns a value and are
+/// cleared between agent runs. Use [`Res<T>`] instead for long-lived state
+/// that persists across executions.
 ///
-/// # When to Use
-///
-/// - **`Out<T>`**: Reading a previous system's return value (ephemeral)
-/// - **`Res<T>`**: Reading long-lived shared state (Memory, Config, etc.)
+/// Implements [`Deref<Target = T>`](core::ops::Deref).
 ///
 /// # Example
 ///
-/// ```ignore
-/// // System A returns a value (stored as output by executor)
-/// fn reason(llm: Res<LLM>) -> ReasoningResult {
+/// ```
+/// # use polaris_system::param::{Res, Out};
+/// # use polaris_system::resource::GlobalResource;
+/// # use polaris_system::system;
+/// # struct LLM;
+/// # impl GlobalResource for LLM {}
+/// # struct ReasoningResult { action: String }
+/// # struct Tools;
+/// # impl GlobalResource for Tools {}
+/// # impl Tools { fn execute(&self, _: &str) -> ToolResult { ToolResult } }
+/// # struct ToolResult;
+/// // System A produces a ReasoningResult
+/// #[system]
+/// async fn reason(llm: Res<LLM>) -> ReasoningResult {
 ///     ReasoningResult { action: "search".into() }
 /// }
 ///
-/// // System B reads System A's output
-/// fn execute(reasoning: Out<ReasoningResult>, tools: Res<Tools>) -> ToolResult {
+/// // System B consumes it via Out<T>
+/// #[system]
+/// async fn execute(reasoning: Out<ReasoningResult>, tools: Res<Tools>) -> ToolResult {
 ///     tools.execute(&reasoning.action)
 /// }
 /// ```

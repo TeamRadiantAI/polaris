@@ -5,27 +5,7 @@
 //! initialization pattern (mutable during `build()`, frozen to `GlobalResource`
 //! in `ready()`).
 //!
-//! # Usage
-//!
-//! ```ignore
-//! use polaris_tools::{ToolsPlugin, ToolRegistry};
-//!
-//! // 1. Add ToolsPlugin to the server
-//! server.add_plugins(ToolsPlugin);
-//!
-//! // 2. Register tools in your plugin's build()
-//! impl Plugin for MyToolsPlugin {
-//!     fn dependencies(&self) -> Vec<PluginId> {
-//!         vec![PluginId::of::<ToolsPlugin>()]
-//!     }
-//!
-//!     fn build(&self, server: &mut Server) {
-//!         let mut registry = server.get_resource_mut::<ToolRegistry>()
-//!             .expect("ToolsPlugin must be added first");
-//!         registry.register(my_tool());
-//!     }
-//! }
-//! ```
+//! See the [crate-level documentation](crate) for a full usage example.
 
 use crate::error::ToolError;
 use crate::tool::Tool;

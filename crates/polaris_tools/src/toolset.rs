@@ -5,8 +5,8 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use polaris_tools::{toolset, tool};
+//! ```
+//! use polaris_tools::{toolset, tool, ToolError};
 //!
 //! struct FileTools;
 //!

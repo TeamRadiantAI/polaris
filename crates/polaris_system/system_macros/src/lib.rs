@@ -5,12 +5,16 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```
 //! use polaris_system::param::Res;
-//! use polaris_system::system;
+//! use polaris_system::resource::GlobalResource;
+//! use polaris_system_macros::system;
 //!
+//! # struct Counter { value: i32 }
+//! # impl GlobalResource for Counter {}
+//! # struct CounterOutput { value: i32 }
 //! #[system]
-//! async fn read_counter(counter: Res<Counter>) -> CounterOutput {
+//! async fn read_counter(counter: Res<'_, Counter>) -> CounterOutput {
 //!     CounterOutput { value: counter.value }
 //! }
 //!
@@ -31,17 +35,25 @@ use syn::{
 ///
 /// # Usage
 ///
-/// ```ignore
+/// ```
+/// # use polaris_system::param::Res;
+/// # use polaris_system::resource::GlobalResource;
+/// # use polaris_system_macros::system;
+/// # struct MyResource { field: i32 }
+/// # impl GlobalResource for MyResource {}
+/// # struct MyOutput { value: i32 }
 /// #[system]
-/// async fn my_system(res: Res<MyResource>) -> MyOutput {
+/// async fn my_system(res: Res<'_, MyResource>) -> MyOutput {
 ///     MyOutput { value: res.field }
 /// }
 ///
 /// // Fallible systems can return Result<T, SystemError>.
 /// // The macro extracts T as the output type and propagates errors.
+/// # use polaris_system::system::SystemError;
+/// # fn do_something(_r: &MyResource) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> { Ok(0) }
 /// #[system]
-/// async fn fallible_system(res: Res<MyResource>) -> Result<MyOutput, SystemError> {
-///     let value = do_something(&res).map_err(|e| SystemError::ExecutionError(e.to_string()))?;
+/// async fn fallible_system(res: Res<'_, MyResource>) -> Result<MyOutput, SystemError> {
+///     let value = do_something(&res).map_err(|err| SystemError::ExecutionError(err.to_string()))?;
 ///     Ok(MyOutput { value })
 /// }
 ///
@@ -52,22 +64,34 @@ use syn::{
 /// # Generated Code
 ///
 /// For an async function like:
-/// ```ignore
+/// ```
+/// # use polaris_system::param::Res;
+/// # use polaris_system::resource::GlobalResource;
+/// # use polaris_system_macros::system;
+/// # struct Counter { count: i32 }
+/// # impl GlobalResource for Counter {}
+/// # struct Output { value: i32 }
 /// #[system]
-/// async fn read_counter(counter: Res<Counter>) -> Output {
+/// async fn read_counter(counter: Res<'_, Counter>) -> Output {
 ///     Output { value: counter.count }
 /// }
 /// ```
 ///
 /// The macro generates:
-/// ```ignore
+/// ```
+/// # use polaris_system::param::{Res, SystemContext, SystemParam, SystemAccess};
+/// # use polaris_system::system::{System, SystemError, BoxFuture};
+/// # use polaris_system::resource::GlobalResource;
+/// # struct Counter { count: i32 }
+/// # impl GlobalResource for Counter {}
+/// # struct Output { value: i32 }
 /// struct ReadCounterSystem;
 ///
 /// impl System for ReadCounterSystem {
 ///     type Output = Output;
 ///
 ///     fn run<'a>(&'a self, ctx: &'a SystemContext<'_>)
-///         -> BoxFuture<'a, Result<Self::Output, SystemError>>
+///         -> BoxFuture<'a, ::core::result::Result<Self::Output, SystemError>>
 ///     {
 ///         Box::pin(async move {
 ///             let counter = Res::<Counter>::fetch(ctx)?;
@@ -77,6 +101,10 @@ use syn::{
 ///
 ///     fn name(&self) -> &'static str {
 ///         "read_counter"
+///     }
+///     
+///     fn access(&self) -> SystemAccess {
+///         SystemAccess::new()
 ///     }
 /// }
 ///
