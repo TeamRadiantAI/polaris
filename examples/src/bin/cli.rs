@@ -173,7 +173,7 @@ async fn main() {
         .cloned()
         .unwrap_or_else(|| "default".to_string());
 
-    let agent_config = AgentConfig::new("claude-sonnet-4-6");
+    let agent_config = AgentConfig::new("anthropic/claude-sonnet-4-6");
     let file_tools_config = FileToolsConfig::new(&working_dir);
 
     // Build server

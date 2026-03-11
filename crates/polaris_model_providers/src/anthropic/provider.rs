@@ -5,6 +5,7 @@ use super::types::{
     ContentBlock, ContentBlockParam, CreateMessageRequest, ImageMediaType, ImageSource,
     MessageParam, OutputFormat, Role, ToolChoiceParam, ToolDef, ToolResultBlock, ToolResultContent,
 };
+use crate::schema::normalize_schema_for_strict_mode;
 use async_trait::async_trait;
 use polaris_models::llm::{
     AssistantBlock, GenerationError, ImageBlock, ImageMediaType as PolarisImageMediaType,
@@ -62,7 +63,7 @@ fn convert_request(
             .map(|tool| ToolDef {
                 name: tool.name.clone(),
                 description: Some(tool.description.clone()),
-                input_schema: tool.parameters.clone(),
+                input_schema: normalize_schema_for_strict_mode(tool.parameters.clone()),
                 strict: Some(true),
             })
             .collect()
